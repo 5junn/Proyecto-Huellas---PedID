@@ -1,0 +1,68 @@
+/* src/styles/theme.css */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800;900&display=swap');
+
+:root {
+  /* Paleta Cálida & Médica Equilibrada (Warm Obsidian + Emerald + Amber) */
+  --bg-app: #0B0F17;
+  --bg-surface: #111827;
+  --bg-surface-elevated: #162032;
+  --bg-card: #1A2436;
+  --bg-card-light: #FFFFFF;
+
+  /* Acentos Clave */
+  --brand-emerald: #10B981;
+  --brand-emerald-dark: #059669;
+  --brand-emerald-glow: rgba(16, 185, 129, 0.25);
+
+  --brand-amber: #F59E0B;
+  --brand-amber-dark: #D97706;
+  --brand-amber-glow: rgba(245, 158, 11, 0.25);
+
+  --brand-indigo: #6366F1;
+  --brand-indigo-dark: #4F46E5;
+
+  --brand-rose: #EF4444;
+  --brand-rose-glow: rgba(239, 68, 68, 0.3);
+
+  /* Gradientes Sofisticados */
+  --brand-gradient: linear-gradient(135deg, #10B981 0%, #059669 50%, #0F172A 100%);
+  --brand-gradient-warm: linear-gradient(135deg, #F59E0B 0%, #10B981 100%);
+  --brand-gradient-subtle: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(245, 158, 11, 0.08) 100%);
+
+  /* Neutros & Textos */
+  --text-primary: #0F172A;
+  --text-primary-dark: #F9FAFB;
+  --text-secondary: #475569;
+  --text-secondary-dark: #9CA3AF;
+  --text-muted: #64748B;
+  --border-light: #E2E8F0;
+  --border-dark: rgba(255, 255, 255, 0.09);
+  --border-focus: #10B981;
+
+  /* Alertas */
+  --error-bg: #FEF2F2;
+  --error-border: #FECACA;
+  --error-text: #B91C1C;
+  --success-bg: #ECFDF5;
+  --success-border: #A7F3D0;
+  --success-text: #047857;
+
+  --radius-lg: 20px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --shadow-elevation: 0 20px 40px -15px rgba(0, 0, 0, 0.3);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  background-color: var(--bg-app);
+  color: var(--text-primary-dark);
+  min-height: 100vh;
+  overflow-x: hidden;
+}

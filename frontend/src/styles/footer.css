@@ -1,0 +1,228 @@
+/* src/styles/footer.css */
+
+.hp-footer {
+  position: relative;
+  background-color: #070C1D;
+  color: #94A3B8;
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.hp-footer-top-wave {
+  position: absolute;
+  top: -30px;
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  line-height: 0;
+  pointer-events: none;
+}
+
+.hp-footer-content {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 2rem;
+}
+
+.hp-footer-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1.1fr 1.3fr;
+  gap: 3rem;
+  margin-bottom: 3.5rem;
+}
+
+/* Columna Brand */
+.hp-footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-bottom: 1.2rem;
+}
+
+.hp-footer-title {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #FFFFFF;
+  letter-spacing: -0.02em;
+}
+
+.hp-footer-subtitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #38BDF8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  display: block;
+}
+
+.hp-footer-desc {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #94A3B8;
+  margin-bottom: 1.5rem;
+}
+
+.hp-footer-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.hp-badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.75rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-pill);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #CBD5E1;
+}
+
+/* Headings */
+.hp-footer-heading {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: #FFFFFF;
+  margin-bottom: 1.25rem;
+  letter-spacing: -0.01em;
+}
+
+.hp-footer-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.hp-footer-list li a {
+  font-size: 0.88rem;
+  color: #94A3B8;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hp-footer-list li a:hover {
+  color: #38BDF8;
+  transform: translateX(3px);
+}
+
+.hp-footer-highlight-link {
+  color: #34D399 !important;
+  font-weight: 600;
+}
+
+.hp-footer-staff-link {
+  color: #60A5FA !important;
+  font-weight: 600;
+}
+
+/* Columna Emergencia */
+.hp-emergency-card {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 0.85rem 1.1rem;
+  border-radius: var(--radius-md);
+  margin-bottom: 1.25rem;
+}
+
+.hp-em-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #EF4444;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.hp-em-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #F87171;
+  letter-spacing: 0.03em;
+}
+
+.hp-em-number {
+  font-size: 1rem;
+  color: #FFFFFF;
+  font-weight: 800;
+}
+
+.hp-contact-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-size: 0.84rem;
+  color: #94A3B8;
+  margin-bottom: 0.75rem;
+  line-height: 1.4;
+}
+
+.hp-contact-item svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #38BDF8;
+}
+
+/* Bottom */
+.hp-footer-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 2rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 0.82rem;
+  color: #64748B;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.hp-footer-meta-links {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.hp-footer-meta-links a {
+  color: #64748B;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.hp-footer-meta-links a:hover {
+  color: #94A3B8;
+}
+
+@media (max-width: 1024px) {
+  .hp-footer-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 2.5rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .hp-footer-grid {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  .hp-footer-bottom {
+    flex-direction: column;
+    text-align: center;
+  }
+}
