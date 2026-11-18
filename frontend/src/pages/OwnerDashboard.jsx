@@ -1,11 +1,14 @@
 // src/pages/OwnerDashboard.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import Logo from '../components/Logo';
+import CollarQRTag from '../components/CollarQRTag';
+import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
 import { getUser } from '../services/authService';
+import { scheduleWhatsAppReminder } from '../services/whatsappService';
 import '../styles/owner.css';
 
 const MASCOTAS_INICIALES = [
@@ -50,12 +53,41 @@ const MASCOTAS_INICIALES = [
 
 export default function OwnerDashboard() {
   const user = getUser() || { nombres: 'Lucía Paredes', correo: 'propietario@gmail.com', rol: 'Propietario', telefono: '987 654 321' };
-  
-  const [mascotas, setMascotas] = useState(MASCOTAS_INICIALES);
+
+  // Cargar mascotas del almacenamiento local si existen nuevas
+  const [mascotas, setMascotas] = useState(() => {
+    try {
+      const stored = localStorage.getItem('huellas_mascotas');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Fusionar sin duplicados
+          const existingIds = new Set(parsed.map((p) => p.codigoQR || p.id));
+          const leftovers = MASCOTAS_INICIALES.filter((m) => !existingIds.has(m.codigoQR) && !existingIds.has(m.id));
+          return [...parsed, ...leftovers];
+        }
+      }
+    } catch {
+      // Usar iniciales
+    }
+    return MASCOTAS_INICIALES;
+  });
+
   const [selectedPet, setSelectedPet] = useState(mascotas[0]);
   const [modalCarnetOpen, setModalCarnetOpen] = useState(false);
   const [modalNewPetOpen, setModalNewPetOpen] = useState(false);
   const [alertSuccess, setAlertSuccess] = useState('');
+
+  // Estados para Modal de Vista QR & Collar
+  const [modalQRViewOpen, setModalQRViewOpen] = useState(false);
+  const [selectedQRPet, setSelectedQRPet] = useState(null);
+  const [qrModalStage, setQrModalStage] = useState('collar'); // 'collar' | 'habitual'
+
+  // Estados para Recordatorios por WhatsApp (API Externa)
+  const [modalWhatsAppOpen, setModalWhatsAppOpen] = useState(false);
+  const [whatsAppTarget, setWhatsAppTarget] = useState({ pet: null, vaccine: null });
+  const [whatsAppStatus, setWhatsAppStatus] = useState(null);
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
 
   // Formulario nueva mascota
   const [newPet, setNewPet] = useState({
@@ -66,7 +98,29 @@ export default function OwnerDashboard() {
     sexo: 'Macho',
     peso: '',
     color: '',
+    foto: ''
   });
+
+  const handleModalPhotoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (typeof event.target?.result === 'string') {
+        setNewPet((prev) => ({ ...prev, foto: event.target.result }));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Guardar en localStorage cuando cambian las mascotas
+  useEffect(() => {
+    try {
+      localStorage.setItem('huellas_mascotas', JSON.stringify(mascotas));
+    } catch {
+      // Ignorar errores
+    }
+  }, [mascotas]);
 
   const toggleModoExtravio = (petId) => {
     setMascotas((prev) =>
@@ -75,7 +129,7 @@ export default function OwnerDashboard() {
           const nuevoEstado = !pet.estadoExtravio;
           const msg = nuevoEstado
             ? `¡ALERTA ACTIVADA! ${pet.nombre} está ahora en Modo Mascota Perdida. Cualquier escaneo QR notificará tus datos de emergencia.`
-            : `Modo Extravío desactivado para ${pet.nombre}. Todo seguro.`;
+            : `Modo Extravío desactivado para ${pet.nombre}. Todo seguro en Modo Habitual/Control.`;
           setAlertSuccess(msg);
           setTimeout(() => setAlertSuccess(''), 5000);
           return { ...pet, estadoExtravio: nuevoEstado };
@@ -83,6 +137,52 @@ export default function OwnerDashboard() {
         return pet;
       })
     );
+  };
+
+  const handleOpenQRModal = (pet) => {
+    setSelectedQRPet(pet);
+    setQrModalStage('collar');
+    setModalQRViewOpen(true);
+  };
+
+  const handleOpenWhatsAppReminder = (pet, vaccine) => {
+    setWhatsAppTarget({
+      pet,
+      vaccine: vaccine || { nombre: 'Vacunación General / Refuerzo', proxima: 'En 30 días' }
+    });
+    setWhatsAppStatus(null);
+    setModalWhatsAppOpen(true);
+  };
+
+  const handleConfirmWhatsAppReminder = async () => {
+    if (!whatsAppTarget.pet) return;
+    setSendingWhatsApp(true);
+    setWhatsAppStatus(null);
+
+    try {
+      const res = await scheduleWhatsAppReminder({
+        petName: whatsAppTarget.pet.nombre,
+        ownerName: user.nombres,
+        ownerPhone: user.telefono || '987 654 321',
+        reminderType: 'vacuna',
+        vaccineName: whatsAppTarget.vaccine?.nombre || 'Vacuna de Refuerzo',
+        dueDate: whatsAppTarget.vaccine?.proxima || 'En 30 días'
+      });
+
+      setWhatsAppStatus({
+        ok: true,
+        message: '¡Recordatorio programado con éxito mediante la API externa de WhatsApp!',
+        payload: res.data,
+        directLink: res.directLink
+      });
+    } catch {
+      setWhatsAppStatus({
+        ok: false,
+        message: 'No se pudo conectar a la API externa de WhatsApp.'
+      });
+    } finally {
+      setSendingWhatsApp(false);
+    }
   };
 
   const handleCreatePet = (e) => {
@@ -100,16 +200,16 @@ export default function OwnerDashboard() {
       color: newPet.color || 'Varios',
       codigoQR: 'HP-' + Math.floor(1000 + Math.random() * 9000),
       estadoExtravio: false,
-      foto: newPet.especie === 'Gato'
+      foto: newPet.foto || (newPet.especie === 'Gato'
         ? 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80'
-        : 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80',
+        : 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80'),
       vacunas: [
         { nombre: 'Revisión Inicial Clínica Huellas', fecha: 'Hoy', proxima: 'En 30 días', estado: 'ok', vet: 'Dra. Ana Torres' }
       ],
       alergias: 'Por evaluar en consulta médica.',
     };
 
-    setMascotas([...mascotas, nueva]);
+    setMascotas([nueva, ...mascotas]);
     setModalNewPetOpen(false);
     setNewPet({ nombre: '', especie: 'Perro', raza: '', edad: '', sexo: 'Macho', peso: '', color: '' });
     setAlertSuccess(`¡${nueva.nombre} ha sido registrada con éxito en tu cuenta de propietario!`);
@@ -131,18 +231,19 @@ export default function OwnerDashboard() {
               </span>
               <h1>Hola, {user.nombres.split(' ')[0]}</h1>
               <p>
-                Gestiona tus mascotas registradas, consulta su carnet de vacunación en la nube y mantén sus placas QR actualizadas.
+                Gestiona tus mascotas registradas, consulta su carnet de vacunación en la nube, visualiza las placas QR de sus collares y programa recordatorios por WhatsApp.
               </p>
             </div>
 
-            <div className="hp-welcome-actions">
-              <button
+            <div className="hp-welcome-actions" style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap' }}>
+              <Link
+                to="/registrar-mascota"
                 className="hp-btn-add-pet"
-                onClick={() => setModalNewPetOpen(true)}
+                style={{ textDecoration: 'none' }}
               >
                 <Icon name="plus" size={18} />
-                <span>Registrar Nueva Mascota</span>
-              </button>
+                <span>Registrar Mascota con Placa QR</span>
+              </Link>
             </div>
           </section>
 
@@ -175,7 +276,7 @@ export default function OwnerDashboard() {
             <div className="hp-section-title-row">
               <div>
                 <h2>Mis Mascotas Protegidas ({mascotas.length})</h2>
-                <p>Haz clic en cualquier mascota para ver o descargar su carnet y gestionar su placa.</p>
+                <p>Haz clic en "Vista QR" para ver la placa del collar y simular su escaneo, o revisa su carnet y recordatorios por WhatsApp.</p>
               </div>
             </div>
 
@@ -220,12 +321,35 @@ export default function OwnerDashboard() {
                           <span>Carnet Clínico Huellas</span>
                         </span>
                         <span className="hp-vax-status ok">
-                          {pet.vacunas.length} vacunas vigentes
+                          {pet.vacunas?.length || 0} vacunas vigentes
                         </span>
                       </div>
                       <p className="hp-vax-note">
-                        Última vacuna: {pet.vacunas[0]?.nombre} ({pet.vacunas[0]?.fecha})
+                        Última vacuna: {pet.vacunas?.[0]?.nombre} ({pet.vacunas?.[0]?.fecha})
                       </p>
+
+                      {/* BOTÓN RÁPIDO PARA RECORDATORIO POR WHATSAPP */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenWhatsAppReminder(pet, pet.vacunas?.[0])}
+                        style={{
+                          marginTop: '0.6rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          background: 'rgba(16, 185, 129, 0.15)',
+                          color: '#10B981',
+                          border: '1px solid rgba(16, 185, 129, 0.3)',
+                          padding: '0.35rem 0.7rem',
+                          borderRadius: '8px',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Icon name="whatsapp" size={14} />
+                        <span>Programar Recordatorio WhatsApp (API)</span>
+                      </button>
                     </div>
 
                     {/* BOTONES DE ACCIÓN */}
@@ -241,21 +365,23 @@ export default function OwnerDashboard() {
                         <span>Ver Carnet Digital</span>
                       </button>
 
-                      <Link
-                        to={`/pet/${pet.codigoQR}`}
+                      {/* BOTÓN VISTA QR MODAL INTERACTIVO */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenQRModal(pet)}
                         className="hp-pet-btn preview"
-                        title="Ver cómo ve el público la ficha de tu mascota"
+                        title="Ver ventana modal con el QR del collar y datos de la mascota"
                       >
                         <Icon name="qr" size={16} />
                         <span>Vista QR</span>
-                      </Link>
+                      </button>
                     </div>
 
                     {/* SWITCH MODO EXTRAVIADO */}
                     <div className="hp-lost-toggle-box">
                       <div className="hp-lost-toggle-text">
                         <strong>Modo Mascota Extraviada</strong>
-                        <span>Muestra alerta roja y recompensa al escanear</span>
+                        <span>Muestra alerta roja y teléfonos de emergencia al escanear</span>
                       </div>
                       <button
                         type="button"
@@ -287,21 +413,358 @@ export default function OwnerDashboard() {
             </div>
 
             <div className="hp-clinic-card-right">
-              <a
-                href="https://wa.me/51987654321?text=Hola,%20deseo%20agendar%20una%20cita%20veterinaria%20para%20mi%20mascota"
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() => {
+                  setWhatsAppTarget({
+                    pet: mascotas[0] || { nombre: 'tu mascota', codigoQR: 'HP-4092' },
+                    vaccine: { nombre: 'Consulta Médica & Vacunación', proxima: 'Próxima semana' }
+                  });
+                  setModalWhatsAppOpen(true);
+                }}
                 className="hp-btn-whatsapp-clinic"
+                style={{ border: 'none', cursor: 'pointer' }}
               >
-                <Icon name="phone" size={18} />
-                <span>Agendar Cita por WhatsApp</span>
-              </a>
+                <Icon name="whatsapp" size={18} />
+                <span>Agendar con HuellasBot (Chatbot)</span>
+              </button>
             </div>
           </section>
         </div>
       </main>
 
-      {/* MODAL CARNET DE VACUNACIÓN DIGITAL */}
+      {/* ========================================================
+          MODAL 1: VISTA QR EN EL COLLAR & ESCANEO A MODO HABITUAL/CONTROL
+         ======================================================== */}
+      {modalQRViewOpen && selectedQRPet && (
+        <div className="hp-modal-overlay" onClick={() => setModalQRViewOpen(false)}>
+          <div
+            className="hp-modal-card"
+            style={{ maxWidth: '540px' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header del Modal */}
+            <div className="hp-modal-header">
+              <div className="hp-modal-title-group">
+                <Icon name="qr" size={26} />
+                <div>
+                  <h3>
+                    {qrModalStage === 'collar'
+                      ? `Placa QR en Collar de ${selectedQRPet.nombre}`
+                      : `Ficha Pública: ${selectedQRPet.nombre} (Modo Habitual)`}
+                  </h3>
+                  <span>
+                    {qrModalStage === 'collar'
+                      ? 'Simulación física de la placa de identificación inteligente'
+                      : 'Protegido por Ley de Protección de Datos Personales N° 29733'}
+                  </span>
+                </div>
+              </div>
+              <button
+                className="hp-modal-close-btn"
+                onClick={() => setModalQRViewOpen(false)}
+              >
+                <Icon name="close" size={20} />
+              </button>
+            </div>
+
+            {/* Pestañas de navegación interna del modal */}
+            <div style={{
+              display: 'flex',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+              background: 'rgba(15, 23, 42, 0.5)'
+            }}>
+              <button
+                type="button"
+                onClick={() => setQrModalStage('collar')}
+                style={{
+                  flex: 1,
+                  padding: '0.8rem',
+                  background: qrModalStage === 'collar' ? 'rgba(56, 189, 248, 0.15)' : 'transparent',
+                  color: qrModalStage === 'collar' ? '#38BDF8' : '#94A3B8',
+                  border: 'none',
+                  borderBottom: qrModalStage === 'collar' ? '2px solid #38BDF8' : '2px solid transparent',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem'
+                }}
+              >
+                <Icon name="paw" size={15} />
+                <span>1. Placa en Collar</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setQrModalStage('habitual')}
+                style={{
+                  flex: 1,
+                  padding: '0.8rem',
+                  background: qrModalStage === 'habitual' ? 'rgba(16, 185, 129, 0.15)' : 'transparent',
+                  color: qrModalStage === 'habitual' ? '#10B981' : '#94A3B8',
+                  border: 'none',
+                  borderBottom: qrModalStage === 'habitual' ? '2px solid #10B981' : '2px solid transparent',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem'
+                }}
+              >
+                <Icon name="shield" size={15} />
+                <span>2. Modo Habitual / Control</span>
+              </button>
+            </div>
+
+            <div className="hp-modal-body" style={{ padding: '1.5rem' }}>
+              {qrModalStage === 'collar' ? (
+                /* FASE 1: COLLAR Y PLACA CON CÓDIGO QR */
+                <div>
+                  <div style={{ textAlign: 'center', marginBottom: '1rem' }}>
+                    <p style={{ color: '#CBD5E1', fontSize: '0.88rem', margin: 0 }}>
+                      Esta es la medalla que llevará <strong>{selectedQRPet.nombre}</strong> en su collar. Cualquier teléfono con cámara puede escanear este código QR:
+                    </p>
+                  </div>
+
+                  <CollarQRTag
+                    pet={selectedQRPet}
+                    onScanSimulate={() => setQrModalStage('habitual')}
+                  />
+                </div>
+              ) : (
+                /* FASE 2: TRAS ESCANEAR -> MODO HABITUAL / CONTROL (LEY PROTECCIÓN DE DATOS) */
+                <div style={{
+                  background: 'rgba(15, 23, 42, 0.75)',
+                  borderRadius: '20px',
+                  padding: '1.4rem',
+                  border: '1px solid rgba(255, 255, 255, 0.1)'
+                }}>
+                  {/* Badge de estado seguro */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    color: '#10B981',
+                    padding: '0.6rem 0.8rem',
+                    borderRadius: '12px',
+                    fontSize: '0.78rem',
+                    marginBottom: '1.2rem'
+                  }}>
+                    <Icon name="shield" size={18} />
+                    <span>
+                      <strong>Escaneo Exitoso · Modo Habitual/Control</strong>: La mascota no está reportada como extraviada.
+                    </span>
+                  </div>
+
+                  {/* Ficha: Foto + Nombre */}
+                  <div style={{ textAlign: 'center', marginBottom: '1.2rem' }}>
+                    <img
+                      src={selectedQRPet.foto}
+                      alt={selectedQRPet.nombre}
+                      style={{
+                        width: '90px',
+                        height: '90px',
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        border: '3px solid #10B981',
+                        marginBottom: '0.5rem',
+                        boxShadow: '0 8px 20px rgba(0,0,0,0.4)'
+                      }}
+                    />
+                    <h3 style={{ fontSize: '1.6rem', fontWeight: 900, color: '#FFFFFF', margin: 0 }}>
+                      {selectedQRPet.nombre}
+                    </h3>
+                    <p style={{ color: '#94A3B8', fontSize: '0.85rem', margin: '0.2rem 0 0' }}>
+                      {selectedQRPet.especie} · {selectedQRPet.raza} · {selectedQRPet.edad} · {selectedQRPet.sexo}
+                    </p>
+                    <span style={{
+                      display: 'inline-block',
+                      marginTop: '0.4rem',
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      padding: '0.2rem 0.6rem',
+                      borderRadius: '999px',
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      color: '#38BDF8'
+                    }}>
+                      Placa Verificada: {selectedQRPet.codigoQR}
+                    </span>
+                  </div>
+
+                  {/* SECCIÓN: DATOS DEL PROPIETARIO */}
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    border: '1px solid rgba(255, 255, 255, 0.09)',
+                    borderRadius: '14px',
+                    padding: '0.85rem',
+                    marginBottom: '0.85rem',
+                    textAlign: 'left'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.5rem' }}>
+                      <Icon name="user" size={15} />
+                      <strong style={{ color: '#F59E0B', textTransform: 'uppercase', fontSize: '0.78rem', letterSpacing: '0.04em' }}>
+                        Datos del Propietario
+                      </strong>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>
+                        <span style={{ color: '#94A3B8' }}>Dueño:</span>
+                        <strong style={{ color: '#FFFFFF' }}>{selectedQRPet.propietario || user.nombres || 'Jorge Salas'}</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: '#94A3B8' }}>Distrito:</span>
+                        <strong style={{ color: '#FFFFFF' }}>{selectedQRPet.distrito || selectedQRPet.direccion || 'Miraflores, Lima'}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Cumplimiento de la Ley de Protección de Datos */}
+                  <div style={{
+                    background: 'rgba(15, 23, 42, 0.9)',
+                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    borderRadius: '10px',
+                    padding: '0.65rem 0.8rem',
+                    fontSize: '0.74rem',
+                    color: '#94A3B8',
+                    marginBottom: '1rem',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '0.4rem'
+                  }}>
+                    <Icon name="shield" size={15} />
+                    <div>
+                      <strong style={{ color: '#A7F3D0' }}>Ficha Oficial Verificada (Ley N° 29733): </strong>
+                      Mascota vinculada oficialmente a la cuenta del propietario en la Clínica Veterinaria Huellas.
+                    </div>
+                  </div>
+
+                  {/* Alergias */}
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    padding: '0.8rem',
+                    borderRadius: '12px',
+                    marginBottom: '0.8rem',
+                    fontSize: '0.82rem'
+                  }}>
+                    <div style={{ color: '#F59E0B', fontWeight: 700, marginBottom: '0.2rem' }}>
+                      ⚠️ Alergias y Cuidados Clínicos:
+                    </div>
+                    <p style={{ margin: 0, color: '#E2E8F0', lineHeight: 1.4 }}>
+                      {selectedQRPet.alergias || 'Sin alergias médicas conocidas.'}
+                    </p>
+                  </div>
+
+                  {/* Vacunas */}
+                  <div style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    padding: '0.8rem',
+                    borderRadius: '12px',
+                    marginBottom: '0.8rem'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem' }}>
+                      <span style={{ color: '#38BDF8', fontWeight: 700, fontSize: '0.82rem' }}>
+                        💉 Vacunación Registrada:
+                      </span>
+                      <span style={{ color: '#10B981', fontSize: '0.72rem', fontWeight: 700 }}>
+                        {selectedQRPet.vacunas?.length || 0} Vacunas al día
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                      {selectedQRPet.vacunas?.map((vax, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.76rem', color: '#CBD5E1' }}>
+                          <span>• {vax.nombre}</span>
+                          <span style={{ color: '#10B981' }}>✓ {vax.estado || 'Vigente'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Datos de la Clínica */}
+                  <div style={{
+                    background: 'rgba(56, 189, 248, 0.08)',
+                    border: '1px solid rgba(56, 189, 248, 0.25)',
+                    padding: '0.8rem',
+                    borderRadius: '12px',
+                    textAlign: 'center',
+                    fontSize: '0.8rem',
+                    color: '#CBD5E1'
+                  }}>
+                    <strong style={{ color: '#38BDF8', display: 'block' }}>
+                      Clínica Veterinaria Huellas (Surco, Lima)
+                    </strong>
+                    <span style={{ fontSize: '0.72rem', color: '#94A3B8' }}>
+                      Av. Primavera 1234 · Emergencias 24/7 · Tel: +51 987 654 321
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="hp-modal-footer" style={{ display: 'flex', justifyContent: 'space-between' }}>
+              {qrModalStage === 'habitual' ? (
+                <button
+                  type="button"
+                  className="hp-modal-btn"
+                  onClick={() => setQrModalStage('collar')}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    background: 'rgba(255, 255, 255, 0.1)',
+                    color: 'white'
+                  }}
+                >
+                  <Icon name="arrowLeft" size={15} />
+                  <span>Volver al Collar</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <Link
+                to={`/pet/${selectedQRPet.codigoQR}`}
+                target="_blank"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  fontSize: '0.82rem',
+                  color: '#38BDF8',
+                  textDecoration: 'none',
+                  fontWeight: 700
+                }}
+              >
+                <span>Abrir Ficha Web Completa ↗</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODAL 2: CHATBOT OFICIAL DE WHATSAPP (HUELLASBOT)
+         ======================================================== */}
+      <WhatsAppChatbotModal
+        isOpen={modalWhatsAppOpen}
+        onClose={() => setModalWhatsAppOpen(false)}
+        petName={whatsAppTarget.pet?.nombre || 'tu mascota'}
+        ownerName={user.nombres || 'Propietario'}
+        vaccineName={whatsAppTarget.vaccine?.nombre || 'Vacuna de Refuerzo'}
+        dueDate={whatsAppTarget.vaccine?.proxima || 'En 30 días'}
+        petCode={whatsAppTarget.pet?.codigoQR || 'HP-4092'}
+      />
+
+      {/* ========================================================
+          MODAL 3: CARNET DE VACUNACIÓN DIGITAL
+         ======================================================== */}
       {modalCarnetOpen && selectedPet && (
         <div className="hp-modal-overlay" onClick={() => setModalCarnetOpen(false)}>
           <div className="hp-modal-card" onClick={(e) => e.stopPropagation()}>
@@ -339,21 +802,37 @@ export default function OwnerDashboard() {
                       <th>Fecha de Aplicación</th>
                       <th>Próximo Refuerzo</th>
                       <th>Veterinario Responsable</th>
-                      <th>Estado</th>
+                      <th>Recordatorio WhatsApp</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedPet.vacunas.map((vax, idx) => (
+                    {selectedPet.vacunas?.map((vax, idx) => (
                       <tr key={idx}>
                         <td><strong>{vax.nombre}</strong></td>
                         <td>{vax.fecha}</td>
                         <td>{vax.proxima}</td>
                         <td>{vax.vet}</td>
                         <td>
-                          <span className="hp-carnet-chip ok">
-                            <Icon name="check" size={13} />
-                            <span>Vigente</span>
-                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenWhatsAppReminder(selectedPet, vax)}
+                            style={{
+                              background: 'rgba(16, 185, 129, 0.15)',
+                              color: '#10B981',
+                              border: '1px solid rgba(16, 185, 129, 0.3)',
+                              padding: '0.3rem 0.6rem',
+                              borderRadius: '6px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.3rem'
+                            }}
+                          >
+                            <Icon name="whatsapp" size={13} />
+                            <span>Programar</span>
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -386,7 +865,9 @@ export default function OwnerDashboard() {
         </div>
       )}
 
-      {/* MODAL REGISTRAR NUEVA MASCOTA */}
+      {/* ========================================================
+          MODAL 4: REGISTRAR NUEVA MASCOTA RÁPIDA
+         ======================================================== */}
       {modalNewPetOpen && (
         <div className="hp-modal-overlay" onClick={() => setModalNewPetOpen(false)}>
           <div className="hp-modal-card" onClick={(e) => e.stopPropagation()}>
@@ -482,6 +963,44 @@ export default function OwnerDashboard() {
                     onChange={(e) => setNewPet({ ...newPet, peso: e.target.value })}
                     className="form-input-clean"
                   />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '0.8rem' }}>
+                <label style={{ color: '#E2E8F0', fontSize: '0.85rem', fontWeight: 600 }}>Foto de la Mascota</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', marginTop: '0.4rem' }}>
+                  {newPet.foto && (
+                    <img
+                      src={newPet.foto}
+                      alt="Foto"
+                      style={{ width: '46px', height: '46px', borderRadius: '50%', objectFit: 'cover', border: '2px solid #10B981' }}
+                    />
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    id="modal-quick-photo"
+                    onChange={handleModalPhotoUpload}
+                    style={{ display: 'none' }}
+                  />
+                  <label
+                    htmlFor="modal-quick-photo"
+                    style={{
+                      padding: '0.5rem 0.9rem',
+                      borderRadius: '8px',
+                      background: '#0284C7',
+                      color: '#FFFFFF',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem'
+                    }}
+                  >
+                    <Icon name="upload" size={15} />
+                    <span>{newPet.foto ? 'Cambiar Foto' : 'Cargar Foto de la Mascota'}</span>
+                  </label>
                 </div>
               </div>
 
