@@ -5,11 +5,13 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import Logo from '../components/Logo';
+import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
 import '../styles/landing.css';
 
 export default function Landing() {
   const [simulatorMode, setSimulatorMode] = useState('normal'); // 'normal' | 'lost'
   const [alertSent, setAlertSent] = useState(false);
+  const [isChatbotOpen, setIsChatbotOpen] = useState(false);
 
   const handleSimulateScan = () => {
     setAlertSent(true);
@@ -39,7 +41,7 @@ export default function Landing() {
             </p>
 
             <div className="hp-hero-actions">
-              <Link to="/register" className="hp-hero-btn primary">
+              <Link to="/registrar-mascota" className="hp-hero-btn primary">
                 <Icon name="paw" size={20} />
                 <span>Registrar Mascota Gratis</span>
               </Link>
@@ -277,10 +279,15 @@ export default function Landing() {
                           <Icon name="phone" size={18} />
                           <span>Llamar al Dueño (Jorge Salas)</span>
                         </a>
-                        <a href="https://wa.me/51987654321" target="_blank" rel="noreferrer" className="hp-screen-btn whatsapp">
-                          <Icon name="mail" size={18} />
-                          <span>Enviar WhatsApp con mi Ubicación</span>
-                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setIsChatbotOpen(true)}
+                          className="hp-screen-btn whatsapp"
+                          style={{ border: 'none', cursor: 'pointer' }}
+                        >
+                          <Icon name="whatsapp" size={18} />
+                          <span>Contactar mediante HuellasBot</span>
+                        </button>
                       </div>
 
                       <div className="hp-screen-info-card">
@@ -317,10 +324,6 @@ export default function Landing() {
                         <div className="hp-info-row">
                           <span>Dueño:</span>
                           <strong>Jorge Salas</strong>
-                        </div>
-                        <div className="hp-info-row">
-                          <span>Teléfono:</span>
-                          <strong>+51 987 654 321</strong>
                         </div>
                         <div className="hp-info-row">
                           <span>Distrito:</span>
@@ -556,6 +559,16 @@ export default function Landing() {
           </div>
         </div>
       </section>
+
+      <WhatsAppChatbotModal
+        isOpen={isChatbotOpen}
+        onClose={() => setIsChatbotOpen(false)}
+        petName="Toby"
+        ownerName="Jorge Salas"
+        vaccineName="Alerta de Rescate Huellas PetID"
+        dueDate="Inmediato"
+        petCode="HP-4092"
+      />
 
       <Footer />
     </div>
