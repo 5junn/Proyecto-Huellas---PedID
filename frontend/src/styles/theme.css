@@ -4,6 +4,9 @@
 :root {
   /* Paleta Cálida & Médica Equilibrada (Warm Obsidian + Emerald + Amber) */
   --bg-app: #0B0F17;
+  --primary-navy: #0B0F17;
+  --text-main: #F9FAFB;
+  --font-display: 'Outfit', sans-serif;
   --bg-surface: #111827;
   --bg-surface-elevated: #162032;
   --bg-card: #1A2436;
@@ -47,9 +50,11 @@
   --success-border: #A7F3D0;
   --success-text: #047857;
 
+  --radius-xl: 28px;
   --radius-lg: 20px;
   --radius-md: 12px;
   --radius-sm: 8px;
+  --radius-pill: 9999px;
   --shadow-elevation: 0 20px 40px -15px rgba(0, 0, 0, 0.3);
 }
 
