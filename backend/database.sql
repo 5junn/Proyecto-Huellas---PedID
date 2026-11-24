@@ -36,15 +36,26 @@ CREATE TABLE IF NOT EXISTS `propietarios` (
   FOREIGN KEY (`id_usuario`) REFERENCES `usuarios`(`id_usuario`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 3. Tabla de Mascotas
+-- 3. Tabla Normalizada de Razas (Requisito Académico Oficial Huellas PetID)
+-- Evita errores de inconsistencia y mezclas de mayúsculas/minúsculas
+CREATE TABLE IF NOT EXISTS `razas` (
+  `id_raza` INT AUTO_INCREMENT PRIMARY KEY,
+  `nombre_raza` VARCHAR(100) NOT NULL UNIQUE,
+  `especie` ENUM('Canino', 'Felino', 'Conejo', 'Ave', 'Otro') NOT NULL DEFAULT 'Canino',
+  `descripcion` VARCHAR(255) DEFAULT NULL,
+  `creado_en` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
+-- 4. Tabla de Mascotas (Vinculada a Propietarios y a la Tabla Normalizada de Razas)
 CREATE TABLE IF NOT EXISTS `mascotas` (
   `id_mascota` INT AUTO_INCREMENT PRIMARY KEY,
   `id_propietario` INT NOT NULL,
+  `id_raza` INT DEFAULT NULL,
   `codigo_qr` VARCHAR(50) NOT NULL UNIQUE,
   `microchip` VARCHAR(50) DEFAULT NULL UNIQUE,
   `nombre` VARCHAR(80) NOT NULL,
-  `especie` ENUM('Canino', 'Felino', 'Conejo', 'Otro') NOT NULL DEFAULT 'Canino',
-  `raza` VARCHAR(80) NOT NULL,
+  `especie` ENUM('Canino', 'Felino', 'Conejo', 'Ave', 'Otro') NOT NULL DEFAULT 'Canino',
+  `raza` VARCHAR(80) DEFAULT NULL,
   `sexo` ENUM('Macho', 'Hembra') NOT NULL,
   `fecha_nacimiento` DATE DEFAULT NULL,
   `peso_actual` DECIMAL(5,2) DEFAULT NULL,
@@ -56,10 +67,11 @@ CREATE TABLE IF NOT EXISTS `mascotas` (
   `recompensa` VARCHAR(80) DEFAULT 'S/ 500',
   `estado` ENUM('Activo', 'En Observación', 'Fallecido') NOT NULL DEFAULT 'Activo',
   `creado_en` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (`id_propietario`) REFERENCES `propietarios`(`id_propietario`) ON DELETE CASCADE
+  FOREIGN KEY (`id_propietario`) REFERENCES `propietarios`(`id_propietario`) ON DELETE CASCADE,
+  FOREIGN KEY (`id_raza`) REFERENCES `razas`(`id_raza`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 4. Tabla de Consultas Médicas e Historias Clínicas
+-- 5. Tabla de Consultas Médicas e Historias Clínicas
 CREATE TABLE IF NOT EXISTS `consultas_historial` (
   `id_consulta` INT AUTO_INCREMENT PRIMARY KEY,
   `id_mascota` INT NOT NULL,
@@ -75,7 +87,7 @@ CREATE TABLE IF NOT EXISTS `consultas_historial` (
   FOREIGN KEY (`id_veterinario`) REFERENCES `usuarios`(`id_usuario`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 5. Tabla de Carnet de Vacunación
+-- 6. Tabla de Carnet de Vacunación
 CREATE TABLE IF NOT EXISTS `carnet_vacunacion` (
   `id_vacunacion` INT AUTO_INCREMENT PRIMARY KEY,
   `id_mascota` INT NOT NULL,
@@ -90,7 +102,7 @@ CREATE TABLE IF NOT EXISTS `carnet_vacunacion` (
   FOREIGN KEY (`id_veterinario`) REFERENCES `usuarios`(`id_usuario`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- 6. Tabla de Recordatorios y Notificaciones por WhatsApp
+-- 7. Tabla de Recordatorios y Notificaciones por WhatsApp
 CREATE TABLE IF NOT EXISTS `recordatorios` (
   `id_recordatorio` INT AUTO_INCREMENT PRIMARY KEY,
   `id_mascota` INT NOT NULL,
@@ -108,7 +120,6 @@ CREATE TABLE IF NOT EXISTS `recordatorios` (
 
 -- =======================================================
 -- DATOS INICIALES DE DEMOSTRACIÓN (PASSWORD: password123)
--- Hash bcrypt para 'password123': $2a$12$e0l0v3k... (o cifrado por backend)
 -- =======================================================
 
 INSERT INTO `usuarios` (`nombres`, `correo`, `contrasena_cifrada`, `rol`, `especialidad`, `turno`, `estado`) VALUES
@@ -126,10 +137,36 @@ INSERT INTO `propietarios` (`nombres`, `dni`, `telefono`, `correo`, `direccion`)
 ('Valeria Núñez Rivas', '71902451', '943210987', 'valeria.nunez@gmail.com', 'Av. El Sol 1102, Chorrillos, Lima')
 ON DUPLICATE KEY UPDATE `nombres` = VALUES(`nombres`);
 
-INSERT INTO `mascotas` (`id_propietario`, `codigo_qr`, `microchip`, `nombre`, `especie`, `raza`, `sexo`, `peso_actual`, `color`, `alergias`, `foto_url`, `modo_extraviado`, `recompensa`) VALUES
-(1, 'HP-4092', '981098124', 'Toby', 'Canino', 'Beagle', 'Macho', 12.40, 'Tricolor', 'Alergia severa a pulgas. No derivados de penicilina.', 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80', 1, 'S/ 500'),
-(2, 'HP-8813', '981098451', 'Luna', 'Felino', 'Siamés', 'Hembra', 3.80, 'Crema y chocolate', 'Ninguna conocida.', 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80', 0, 'S/ 300'),
-(3, 'HP-1294', '981098772', 'Max', 'Canino', 'Golden Retriever', 'Macho', 29.20, 'Dorado', 'Sensibilidad estomacal a granos.', 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80', 0, 'S/ 500')
+-- Población de la Tabla Normalizada de Razas
+INSERT INTO `razas` (`id_raza`, `nombre_raza`, `especie`, `descripcion`) VALUES
+(1, 'Beagle', 'Canino', 'Raza mediana, sabueso de gran olfato y temperamento sociable'),
+(2, 'Golden Retriever', 'Canino', 'Raza grande de pelo largo, dócil y excelente perro familiar'),
+(3, 'Labrador Retriever', 'Canino', 'Raza grande enérgica, leal y fácil de entrenar'),
+(4, 'Bulldog Francés', 'Canino', 'Raza braquicéfala pequeña, afectuosa y tranquila'),
+(5, 'Bulldog Inglés', 'Canino', 'Raza robusta y tranquila, de hocico chato'),
+(6, 'Pastor Alemán', 'Canino', 'Raza de trabajo inteligente y muy protectora'),
+(7, 'Poodle (Caniche)', 'Canino', 'Raza de gran inteligencia con pelaje rizado hipoalergénico'),
+(8, 'Pug (Carlino)', 'Canino', 'Raza pequeña braquicéfala y muy juguetona'),
+(9, 'Chihuahua', 'Canino', 'La raza canina más pequeña del mundo, vivaz y leal'),
+(10, 'Husky Siberiano', 'Canino', 'Raza nórdica con pelaje denso y ojos llamativos'),
+(11, 'Schnauzer Miniatura', 'Canino', 'Raza compacta con barba característica y gran agilidad'),
+(12, 'Mestizo / Criollo Canino', 'Canino', 'Canino sin raza definida o cruce mestizo saludable'),
+(13, 'Siamés', 'Felino', 'Felino esbelto, vocal y de pelaje con patrón colourpoint'),
+(14, 'Persa', 'Felino', 'Felino de cara ancha y abundante pelaje sedoso'),
+(15, 'Bengala', 'Felino', 'Felino con patrón atigrado exótico similar al leopardo'),
+(16, 'Maine Coon', 'Felino', 'Una de las razas de gato doméstico más grandes y dóciles'),
+(17, 'Mestizo / Común Europeo', 'Felino', 'Gato doméstico común, resistente y adaptable'),
+(18, 'Enano Holandés', 'Conejo', 'Conejo de tamaño pequeño con orejas cortas'),
+(19, 'Belier / Mini Lop', 'Conejo', 'Conejo dócil con orejas caídas características'),
+(20, 'Periquito Australiano', 'Ave', 'Ave psitaciforme pequeña y muy sociable'),
+(21, 'Ninfa / Carolina', 'Ave', 'Ave con cresta eréctil y temperamento cariñoso'),
+(22, 'Cobayo / Cuy Peruano', 'Otro', 'Roedor doméstico herbívoro y muy dócil')
+ON DUPLICATE KEY UPDATE `nombre_raza` = VALUES(`nombre_raza`);
+
+INSERT INTO `mascotas` (`id_propietario`, `id_raza`, `codigo_qr`, `microchip`, `nombre`, `especie`, `raza`, `sexo`, `peso_actual`, `color`, `alergias`, `foto_url`, `modo_extraviado`, `recompensa`) VALUES
+(1, 1, 'HP-4092', '981098124', 'Toby', 'Canino', 'Beagle', 'Macho', 12.40, 'Tricolor', 'Alergia severa a pulgas. No derivados de penicilina.', 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80', 1, 'S/ 500'),
+(2, 13, 'HP-8813', '981098451', 'Luna', 'Felino', 'Siamés', 'Hembra', 3.80, 'Crema y chocolate', 'Ninguna conocida.', 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80', 0, 'S/ 300'),
+(3, 2, 'HP-1294', '981098772', 'Max', 'Canino', 'Golden Retriever', 'Macho', 29.20, 'Dorado', 'Sensibilidad estomacal a granos.', 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80', 0, 'S/ 500')
 ON DUPLICATE KEY UPDATE `nombre` = VALUES(`nombre`);
 
 INSERT INTO `carnet_vacunacion` (`id_mascota`, `id_veterinario`, `vacuna`, `lote_fabricante`, `fecha_aplicacion`, `fecha_proximo_refuerzo`, `estado_dosis`) VALUES

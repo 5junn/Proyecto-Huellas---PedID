@@ -1305,7 +1305,24 @@
 
 @media (max-width: 640px) {
   .hp-hero-title {
-    font-size: 2.3rem;
+    font-size: 2.1rem;
+    line-height: 1.2;
+  }
+
+  .hp-hero-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .hp-hero-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hp-hero-trust {
+    flex-direction: column;
+    text-align: center;
+    gap: 0.6rem;
   }
 
   .hp-stats-container {
@@ -1317,10 +1334,10 @@
   }
 
   .hp-cta-content h2 {
-    font-size: 1.9rem;
+    font-size: 1.8rem;
   }
 
   .hp-cta-card {
-    padding: 2.5rem 1.5rem;
+    padding: 2.2rem 1.2rem;
   }
 }

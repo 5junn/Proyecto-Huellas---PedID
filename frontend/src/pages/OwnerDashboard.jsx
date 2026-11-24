@@ -9,6 +9,8 @@ import CollarQRTag from '../components/CollarQRTag';
 import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
 import { getUser } from '../services/authService';
 import { scheduleWhatsAppReminder } from '../services/whatsappService';
+import { getRazasPorEspecie } from '../data/razasData';
+import { getVacunaSugerida } from '../data/vacunasData';
 import '../styles/owner.css';
 
 const MASCOTAS_INICIALES = [
@@ -23,6 +25,9 @@ const MASCOTAS_INICIALES = [
     color: 'Tricolor',
     codigoQR: 'HP-4092',
     estadoExtravio: false,
+    propietario: 'Lucía Paredes',
+    correo: 'propietario@gmail.com',
+    telefono: '987 654 321',
     foto: 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80',
     vacunas: [
       { nombre: 'Antirrábica', fecha: '14 Oct 2026', proxima: '14 Oct 2027', estado: 'ok', vet: 'Dra. Ana Torres' },
@@ -42,6 +47,9 @@ const MASCOTAS_INICIALES = [
     color: 'Crema y chocolate',
     codigoQR: 'HP-8813',
     estadoExtravio: false,
+    propietario: 'Lucía Paredes',
+    correo: 'propietario@gmail.com',
+    telefono: '987 654 321',
     foto: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80',
     vacunas: [
       { nombre: 'Triple Felina', fecha: '10 Sep 2026', proxima: '10 Sep 2027', estado: 'ok', vet: 'Dr. Luis Vega' },
@@ -51,32 +59,65 @@ const MASCOTAS_INICIALES = [
   }
 ];
 
+function getAllPetsFromStorage() {
+  try {
+    const stored = localStorage.getItem('huellas_mascotas');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const existingIds = new Set(parsed.map((p) => p.codigoQR || p.id));
+        const leftovers = MASCOTAS_INICIALES.filter((m) => !existingIds.has(m.codigoQR) && !existingIds.has(m.id));
+        return [...parsed, ...leftovers];
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+  return MASCOTAS_INICIALES;
+}
+
+function filterPetsForUser(allPets, currentUser) {
+  if (!currentUser) return [];
+  const userEmail = (currentUser.correo || '').toLowerCase().trim();
+  const userName = (currentUser.nombres || '').toLowerCase().trim();
+  const isDemoLucia = userEmail === 'propietario@gmail.com' || userName.includes('lucía') || userName.includes('lucia');
+
+  return allPets.filter((pet) => {
+    const petEmail = (pet.correo || pet.ownerEmail || '').toLowerCase().trim();
+    const petOwner = (pet.propietario || '').toLowerCase().trim();
+
+    if (petEmail && userEmail && petEmail === userEmail) {
+      return true;
+    }
+    if (userName && petOwner && (petOwner === userName || petOwner.includes(userName) || userName.includes(petOwner))) {
+      return true;
+    }
+    if (isDemoLucia && (pet.codigoQR === 'HP-4092' || pet.codigoQR === 'HP-8813' || pet.id === 'hp-4092' || pet.id === 'hp-8813')) {
+      return true;
+    }
+    return false;
+  });
+}
+
 export default function OwnerDashboard() {
   const user = getUser() || { nombres: 'Lucía Paredes', correo: 'propietario@gmail.com', rol: 'Propietario', telefono: '987 654 321' };
 
-  // Cargar mascotas del almacenamiento local si existen nuevas
-  const [mascotas, setMascotas] = useState(() => {
-    try {
-      const stored = localStorage.getItem('huellas_mascotas');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // Fusionar sin duplicados
-          const existingIds = new Set(parsed.map((p) => p.codigoQR || p.id));
-          const leftovers = MASCOTAS_INICIALES.filter((m) => !existingIds.has(m.codigoQR) && !existingIds.has(m.id));
-          return [...parsed, ...leftovers];
-        }
-      }
-    } catch {
-      // Usar iniciales
-    }
-    return MASCOTAS_INICIALES;
-  });
+  // Cargar únicamente las mascotas pertenecientes a este perfil/cuenta
+  const [mascotas, setMascotas] = useState(() => filterPetsForUser(getAllPetsFromStorage(), user));
 
-  const [selectedPet, setSelectedPet] = useState(mascotas[0]);
+  const [selectedPet, setSelectedPet] = useState(mascotas[0] || null);
   const [modalCarnetOpen, setModalCarnetOpen] = useState(false);
   const [modalNewPetOpen, setModalNewPetOpen] = useState(false);
   const [alertSuccess, setAlertSuccess] = useState('');
+
+  // Estados para Alertas GPS de Rescate en tiempo real
+  const [gpsAlerts, setGpsAlerts] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   // Estados para Modal de Vista QR & Collar
   const [modalQRViewOpen, setModalQRViewOpen] = useState(false);
@@ -93,7 +134,7 @@ export default function OwnerDashboard() {
   const [newPet, setNewPet] = useState({
     nombre: '',
     especie: 'Perro',
-    raza: '',
+    raza: 'Beagle',
     edad: '',
     sexo: 'Macho',
     peso: '',
@@ -113,30 +154,77 @@ export default function OwnerDashboard() {
     reader.readAsDataURL(file);
   };
 
-  // Guardar en localStorage cuando cambian las mascotas
+  // Sincronización en tiempo real con cambios hechos por recepción o registro exterior
   useEffect(() => {
+    const syncFromStorage = () => {
+      setMascotas(filterPetsForUser(getAllPetsFromStorage(), user));
+    };
+
+    window.addEventListener('storage', syncFromStorage);
+    window.addEventListener('huellas_mascotas_updated', syncFromStorage);
+
+    // Escuchar alertas GPS en tiempo real
+    const syncGpsAlerts = () => {
+      try {
+        const stored = JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
+        setGpsAlerts(stored);
+      } catch (err) {
+        console.error('Error sincronizando alertas GPS:', err);
+      }
+    };
+    window.addEventListener('huellas_alerta_gps_recibida', syncGpsAlerts);
+    window.addEventListener('storage', syncGpsAlerts);
+
+    return () => {
+      window.removeEventListener('storage', syncFromStorage);
+      window.removeEventListener('huellas_mascotas_updated', syncFromStorage);
+      window.removeEventListener('huellas_alerta_gps_recibida', syncGpsAlerts);
+      window.removeEventListener('storage', syncGpsAlerts);
+    };
+  }, []);
+
+  const handleResolveGpsAlert = (alertId) => {
+    const updated = gpsAlerts.filter((a) => a.id !== alertId);
+    setGpsAlerts(updated);
     try {
-      localStorage.setItem('huellas_mascotas', JSON.stringify(mascotas));
-    } catch {
-      // Ignorar errores
+      localStorage.setItem('huellas_alertas_gps', JSON.stringify(updated));
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.error(e);
     }
-  }, [mascotas]);
+    setAlertSuccess('✓ Alerta de rescate GPS resuelta y archivada exitosamente.');
+    setTimeout(() => setAlertSuccess(''), 4500);
+  };
 
   const toggleModoExtravio = (petId) => {
-    setMascotas((prev) =>
-      prev.map((pet) => {
-        if (pet.id === petId) {
-          const nuevoEstado = !pet.estadoExtravio;
-          const msg = nuevoEstado
-            ? `¡ALERTA ACTIVADA! ${pet.nombre} está ahora en Modo Mascota Perdida. Cualquier escaneo QR notificará tus datos de emergencia.`
-            : `Modo Extravío desactivado para ${pet.nombre}. Todo seguro en Modo Habitual/Control.`;
-          setAlertSuccess(msg);
-          setTimeout(() => setAlertSuccess(''), 5000);
-          return { ...pet, estadoExtravio: nuevoEstado };
-        }
-        return pet;
-      })
-    );
+    const allStored = getAllPetsFromStorage();
+    let nuevoEstado = false;
+    let nombreMascota = '';
+
+    const updatedGlobal = allStored.map((p) => {
+      if (p.id === petId || p.codigoQR === petId) {
+        nuevoEstado = !p.estadoExtravio;
+        nombreMascota = p.nombre;
+        return { ...p, estadoExtravio: nuevoEstado };
+      }
+      return p;
+    });
+
+    try {
+      localStorage.setItem('huellas_mascotas', JSON.stringify(updatedGlobal));
+      window.dispatchEvent(new Event('huellas_mascotas_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.error(e);
+    }
+
+    setMascotas(filterPetsForUser(updatedGlobal, user));
+
+    const msg = nuevoEstado
+      ? `¡ALERTA ACTIVADA! ${nombreMascota} está ahora en Modo Mascota Perdida. Cualquier escaneo QR mostrará datos de emergencia.`
+      : `Modo Extravío desactivado para ${nombreMascota}. Todo seguro en Modo Habitual/Control.`;
+    setAlertSuccess(msg);
+    setTimeout(() => setAlertSuccess(''), 5000);
   };
 
   const handleOpenQRModal = (pet) => {
@@ -193,26 +281,46 @@ export default function OwnerDashboard() {
       id: 'hp-' + Math.floor(1000 + Math.random() * 9000),
       nombre: newPet.nombre,
       especie: newPet.especie,
-      raza: newPet.raza || 'Mestizo',
+      raza: newPet.raza || 'Beagle',
       edad: newPet.edad || '1 año',
       sexo: newPet.sexo,
       peso: newPet.peso ? `${newPet.peso} kg` : 'N/A',
       color: newPet.color || 'Varios',
       codigoQR: 'HP-' + Math.floor(1000 + Math.random() * 9000),
       estadoExtravio: false,
+      propietario: user.nombres || 'Lucía Paredes',
+      correo: user.correo || 'propietario@gmail.com',
+      telefono: user.telefono || '987 654 321',
       foto: newPet.foto || (newPet.especie === 'Gato'
         ? 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80'
         : 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80'),
       vacunas: [
-        { nombre: 'Revisión Inicial Clínica Huellas', fecha: 'Hoy', proxima: 'En 30 días', estado: 'ok', vet: 'Dra. Ana Torres' }
+        {
+          nombre: getVacunaSugerida(newPet.especie),
+          fecha: 'Hoy',
+          proxima: 'En 30 días',
+          estado: 'ok',
+          vet: (newPet.especie === 'Gato' || newPet.especie === 'Felino')
+            ? 'Dr. Luis Vega (Medicina Felina)'
+            : 'Dra. Ana Torres (Medicina General)'
+        }
       ],
       alergias: 'Por evaluar en consulta médica.',
     };
 
-    setMascotas([nueva, ...mascotas]);
+    const allStored = getAllPetsFromStorage();
+    const updatedGlobal = [nueva, ...allStored];
+    try {
+      localStorage.setItem('huellas_mascotas', JSON.stringify(updatedGlobal));
+      window.dispatchEvent(new Event('huellas_mascotas_updated'));
+      window.dispatchEvent(new Event('storage'));
+    } catch {
+      // Ignorar error
+    }
+    setMascotas(filterPetsForUser(updatedGlobal, user));
     setModalNewPetOpen(false);
-    setNewPet({ nombre: '', especie: 'Perro', raza: '', edad: '', sexo: 'Macho', peso: '', color: '' });
-    setAlertSuccess(`¡${nueva.nombre} ha sido registrada con éxito en tu cuenta de propietario!`);
+    setNewPet({ nombre: '', especie: 'Perro', raza: 'Beagle', edad: '', sexo: 'Macho', peso: '', color: '' });
+    setAlertSuccess(`¡${nueva.nombre} ha sido registrada con éxito y sincronizada con el perfil de recepción!`);
     setTimeout(() => setAlertSuccess(''), 4500);
   };
 
@@ -255,19 +363,242 @@ export default function OwnerDashboard() {
             </div>
           )}
 
-          {/* BANNER DE EMERGENCIA GLOBAL SI HAY ALGUNA MASCOTA PERDIDA */}
-          {mascotas.some((m) => m.estadoExtravio) && (
-            <div className="hp-lost-pet-banner animate-fade">
-              <div className="hp-lost-pulse-ring" />
-              <div className="hp-lost-banner-content">
-                <Icon name="alert" size={24} />
-                <div>
-                  <strong>¡PROTOCOLO DE MASCOTA EXTRAVIADA ACTIVO!</strong>
-                  <p>
-                    La placa QR de {mascotas.filter((m) => m.estadoExtravio).map((m) => m.nombre).join(', ')} está transmitiendo en modo de rescate prioritario con tus números de contacto directo.
-                  </p>
+          {/* BANNER DE ALERTA GPS DE RESCATE EN TIEMPO REAL (MULTI-ALERTA) */}
+          {gpsAlerts.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+              {gpsAlerts.map((alerta) => (
+                <div
+                  key={alerta.id}
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.25) 0%, rgba(185, 28, 28, 0.35) 100%)',
+                    border: '2px solid #EF4444',
+                    borderRadius: '16px',
+                    padding: '1.2rem 1.5rem',
+                    boxShadow: '0 10px 25px -5px rgba(239, 68, 68, 0.35)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.8rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                      <div style={{
+                        background: '#EF4444',
+                        color: 'white',
+                        borderRadius: '50%',
+                        width: '40px',
+                        height: '40px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: '0 0 15px rgba(239, 68, 68, 0.7)'
+                      }}>
+                        <Icon name="pin" size={22} />
+                      </div>
+                      <div>
+                        <strong style={{ color: '#FCA5A5', fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          🚨 ¡ALERTA DE RESCATE GPS EN VIVO RECIBIDA!
+                        </strong>
+                        <span style={{ color: '#E2E8F0', fontSize: '0.82rem' }}>
+                          Alguien acaba de escanear la placa de tu mascota <strong>{alerta.nombreMascota}</strong> (Placa {alerta.codigoMascota}) y transmitió su ubicación de rescate vía satélite.
+                        </span>
+                      </div>
+                    </div>
+                    <span style={{
+                      background: 'rgba(239, 68, 68, 0.3)',
+                      color: '#FEE2E2',
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: '999px',
+                      fontSize: '0.75rem',
+                      fontWeight: 700
+                    }}>
+                      {alerta.fechaCompleta}
+                    </span>
+                  </div>
+
+                  <div style={{
+                    background: 'rgba(15, 23, 42, 0.75)',
+                    padding: '0.85rem 1rem',
+                    borderRadius: '12px',
+                    fontSize: '0.82rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem',
+                    border: '1px solid rgba(255, 255, 255, 0.1)'
+                  }}>
+                    <span style={{ color: '#CBD5E1' }}>
+                      📍 Coordenadas de rescate: <strong style={{ color: '#38BDF8' }}>{alerta.lat}, {alerta.lng}</strong> (Margen: ±{alerta.precision})
+                    </span>
+                    <span style={{ color: '#94A3B8', fontSize: '0.78rem' }}>
+                      Estado: <strong style={{ color: '#34D399' }}>Activa para recuperación</strong>
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem', flexWrap: 'wrap' }}>
+                    <a
+                      href={alerta.mapsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        background: '#2563EB',
+                        color: '#FFFFFF',
+                        padding: '0.65rem 1.1rem',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                        textDecoration: 'none',
+                        boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)'
+                      }}
+                    >
+                      <Icon name="pin" size={17} />
+                      <span>Abrir Ubicación en Google Maps</span>
+                    </a>
+
+                    <button
+                      onClick={() => handleResolveGpsAlert(alerta.id)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        background: 'rgba(16, 185, 129, 0.2)',
+                        border: '1px solid #10B981',
+                        color: '#34D399',
+                        padding: '0.65rem 1rem',
+                        borderRadius: '12px',
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Icon name="check" size={16} />
+                      <span>Marcar Mascota como Localizada / Archivar Alerta</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ))}
+            </div>
+          )}
+
+          {/* LISTADO DE NOTIFICACIONES DE MASCOTAS EXTRAVIADAS (UNA POR CADA MASCOTA PERDIDA) */}
+          {mascotas.filter((m) => m.estadoExtravio).length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginBottom: '1.5rem' }}>
+              {mascotas.filter((m) => m.estadoExtravio).map((lostPet) => {
+                const petGps = gpsAlerts.find(
+                  (a) =>
+                    a.codigoMascota &&
+                    a.codigoMascota.toUpperCase() === (lostPet.codigoQR || lostPet.id || '').toUpperCase()
+                );
+                return (
+                  <div
+                    key={lostPet.id || lostPet.codigoQR}
+                    className="hp-lost-pet-banner animate-fade"
+                    style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', padding: '1.2rem 1.4rem' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.6rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                        <div style={{
+                          background: '#EF4444',
+                          color: 'white',
+                          borderRadius: '50%',
+                          width: '38px',
+                          height: '38px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          boxShadow: '0 0 12px rgba(239, 68, 68, 0.7)'
+                        }}>
+                          <Icon name="alert" size={22} />
+                        </div>
+                        <div>
+                          <strong style={{ fontSize: '1.02rem', color: '#FEE2E2', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            🚨 ¡PROTOCOLO DE EXTRAVÍO ACTIVO: {lostPet.nombre.toUpperCase()}!
+                          </strong>
+                          <span style={{ fontSize: '0.82rem', color: '#FECACA' }}>
+                            {lostPet.especie} · {lostPet.raza} · Placa: <strong>{lostPet.codigoQR || lostPet.id}</strong>
+                          </span>
+                        </div>
+                      </div>
+                      <span style={{
+                        background: 'rgba(239, 68, 68, 0.35)',
+                        color: '#FFFFFF',
+                        padding: '0.3rem 0.8rem',
+                        borderRadius: '999px',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        border: '1px solid rgba(255, 255, 255, 0.2)'
+                      }}>
+                        🔴 MODO EXTRAVIADO ACTIVO
+                      </span>
+                    </div>
+
+                    <p style={{ margin: 0, fontSize: '0.84rem', color: '#F3F4F6', lineHeight: 1.5 }}>
+                      La placa QR del collar de <strong>{lostPet.nombre}</strong> está transmitiendo la pantalla roja de auxilio con tus números telefónicos de contacto directo ({user.telefono || '987 654 321'}) para llamada inmediata de rescate.
+                    </p>
+
+                    {petGps && (
+                      <div style={{
+                        background: 'rgba(15, 23, 42, 0.7)',
+                        padding: '0.6rem 0.9rem',
+                        borderRadius: '10px',
+                        fontSize: '0.8rem',
+                        color: '#93C5FD',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}>
+                        <Icon name="pin" size={16} />
+                        <span>Última ubicación GPS recibida: {petGps.fechaCompleta} ({petGps.lat}, {petGps.lng})</span>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
+                      <Link
+                        to={`/pet/${lostPet.codigoQR || lostPet.id}`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          background: '#2563EB',
+                          color: '#FFFFFF',
+                          padding: '0.55rem 1rem',
+                          borderRadius: '10px',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          textDecoration: 'none'
+                        }}
+                      >
+                        <Icon name="qr" size={16} />
+                        <span>Ver Ficha QR de Rescate</span>
+                      </Link>
+
+                      <button
+                        onClick={() => toggleModoExtravio(lostPet.id)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          background: 'rgba(16, 185, 129, 0.25)',
+                          border: '1px solid #10B981',
+                          color: '#34D399',
+                          padding: '0.55rem 0.95rem',
+                          borderRadius: '10px',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <Icon name="check" size={16} />
+                        <span>Desactivar Extravío (Mascota Localizada)</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -280,7 +611,60 @@ export default function OwnerDashboard() {
               </div>
             </div>
 
-            <div className="hp-pets-grid">
+            {mascotas.length === 0 ? (
+              <div style={{
+                background: 'rgba(20, 28, 44, 0.65)',
+                border: '1px dashed rgba(255, 255, 255, 0.2)',
+                borderRadius: '20px',
+                padding: '3rem 2rem',
+                textAlign: 'center',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '1rem',
+                margin: '1.5rem 0'
+              }}>
+                <div style={{
+                  width: '64px',
+                  height: '64px',
+                  borderRadius: '50%',
+                  background: 'rgba(56, 189, 248, 0.15)',
+                  color: '#38BDF8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  <Icon name="paw" size={32} />
+                </div>
+                <div>
+                  <h3 style={{ color: '#FFFFFF', fontSize: '1.2rem', marginBottom: '0.4rem' }}>
+                    Aún no tienes mascotas registradas en esta cuenta ({user.correo})
+                  </h3>
+                  <p style={{ color: '#94A3B8', fontSize: '0.88rem', maxWidth: '460px', margin: '0 auto' }}>
+                    Inscribe a tu perro o gato para obtener su placa inteligente con código QR y acceder a su carnet clínico digitalizado.
+                  </p>
+                </div>
+                <Link
+                  to="/registrar-mascota"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    background: '#10B981',
+                    color: '#FFFFFF',
+                    padding: '0.75rem 1.4rem',
+                    borderRadius: '12px',
+                    fontWeight: 700,
+                    textDecoration: 'none',
+                    boxShadow: '0 4px 15px rgba(16, 185, 129, 0.35)'
+                  }}
+                >
+                  <Icon name="plus" size={18} />
+                  <span>Registrar Mi Primera Mascota</span>
+                </Link>
+              </div>
+            ) : (
+              <div className="hp-pets-grid">
               {mascotas.map((pet) => (
                 <article
                   key={pet.id}
@@ -396,6 +780,7 @@ export default function OwnerDashboard() {
                 </article>
               ))}
             </div>
+          )}
           </section>
 
           {/* SERVICIOS DE LA CLÍNICA HUELLAS PARA EL PROPIETARIO */}
@@ -905,12 +1290,17 @@ export default function OwnerDashboard() {
                   <label>Especie</label>
                   <select
                     value={newPet.especie}
-                    onChange={(e) => setNewPet({ ...newPet, especie: e.target.value })}
+                    onChange={(e) => {
+                      const esp = e.target.value;
+                      const rList = getRazasPorEspecie(esp);
+                      setNewPet({ ...newPet, especie: esp, raza: rList[0] || 'Mestizo' });
+                    }}
                     className="form-input-clean"
                   >
-                    <option value="Perro">Perro</option>
-                    <option value="Gato">Gato</option>
+                    <option value="Perro">Canino (Perro)</option>
+                    <option value="Gato">Felino (Gato)</option>
                     <option value="Conejo">Conejo</option>
+                    <option value="Ave">Ave</option>
                     <option value="Otro">Otro</option>
                   </select>
                 </div>
@@ -918,14 +1308,16 @@ export default function OwnerDashboard() {
 
               <div className="hp-form-grid-2">
                 <div className="form-group">
-                  <label>Raza</label>
-                  <input
-                    type="text"
-                    placeholder="Ej. Golden, Mestizo, Siamés"
+                  <label>Raza (Catálogo Normalizado) *</label>
+                  <select
                     value={newPet.raza}
                     onChange={(e) => setNewPet({ ...newPet, raza: e.target.value })}
                     className="form-input-clean"
-                  />
+                  >
+                    {getRazasPorEspecie(newPet.especie).map((r) => (
+                      <option key={r} value={r} style={{ background: '#0F172A', color: '#FFFFFF' }}>{r}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="form-group">

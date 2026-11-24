@@ -10,6 +10,8 @@ export default function Login() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activePortal = searchParams.get('portal') === 'staff' ? 'staff' : 'usuario';
+  const redirectUrl = searchParams.get('redirect');
+  const isAuthRequired = searchParams.get('msg') === 'auth_required';
   
   const [formData, setFormData] = useState({ correo: '', password: '' });
   const [error, setError] = useState('');
@@ -44,6 +46,8 @@ export default function Login() {
         // Si un miembro del staff se loguea por el portal de usuario, lo llevamos a su dashboard clínico
         if (['Administrador', 'Veterinario', 'Recepcionista'].includes(usuario.rol)) {
           navigate('/dashboard', { state: { role: usuario.rol } });
+        } else if (redirectUrl) {
+          navigate(redirectUrl);
         } else {
           navigate('/propietario');
         }
@@ -90,6 +94,25 @@ export default function Login() {
           <span>Personal Clínico</span>
         </button>
       </div>
+
+      {isAuthRequired && (
+        <div style={{
+          background: 'rgba(245, 158, 11, 0.12)',
+          border: '1px solid rgba(245, 158, 11, 0.35)',
+          borderRadius: '12px',
+          padding: '0.8rem 1rem',
+          color: '#FBBF24',
+          fontSize: '0.82rem',
+          marginBottom: '1.2rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.6rem',
+          lineHeight: 1.4
+        }}>
+          <Icon name="lock" size={18} />
+          <span>Para registrar una mascota con su placa QR inteligente, primero debes iniciar sesión o tener una cuenta de propietario.</span>
+        </div>
+      )}
 
       <div className="auth-card-header">
         <div className={`auth-role-pill ${isStaffPortal ? 'staff' : 'owner'}`}>

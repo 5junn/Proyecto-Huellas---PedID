@@ -1,5 +1,5 @@
 // src/pages/RegisterPet.jsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
@@ -7,7 +7,9 @@ import Icon from '../components/Icon';
 import CollarQRTag from '../components/CollarQRTag';
 import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
 import { scheduleWhatsAppReminder } from '../services/whatsappService';
-import { getUser } from '../services/authService';
+import { getUser, isAuthenticated } from '../services/authService';
+import { getRazasPorEspecie } from '../data/razasData';
+import { getVacunaSugerida, getListaVacunasPorEspecie } from '../data/vacunasData';
 import '../styles/landing.css';
 import '../styles/auth.css';
 
@@ -25,6 +27,13 @@ export default function RegisterPet() {
   const currentUser = getUser();
   const fileInputRef = useRef(null);
 
+  // Verificación estricta: Solo usuarios autenticados pueden registrar mascotas
+  useEffect(() => {
+    if (!isAuthenticated()) {
+      navigate('/login?redirect=/registrar-mascota&msg=auth_required', { replace: true });
+    }
+  }, [navigate]);
+
   // Generamos un código QR único para la mascota
   const [generatedCode] = useState(() => 'HP-' + Math.floor(1000 + Math.random() * 9000));
 
@@ -32,7 +41,7 @@ export default function RegisterPet() {
   const [petData, setPetData] = useState({
     nombre: '',
     especie: 'Canino (Perro)',
-    raza: '',
+    raza: 'Beagle',
     edad: '',
     sexo: 'Macho',
     peso: '',
@@ -66,7 +75,18 @@ export default function RegisterPet() {
 
   const handlePetChange = (e) => {
     const { name, value } = e.target;
-    setPetData((prev) => ({ ...prev, [name]: value }));
+    if (name === 'especie') {
+      const razas = getRazasPorEspecie(value);
+      const vacunaAdecuada = getVacunaSugerida(value);
+      setVaccineName(vacunaAdecuada);
+      setPetData((prev) => ({
+        ...prev,
+        especie: value,
+        raza: razas[0] || 'Mestizo'
+      }));
+    } else {
+      setPetData((prev) => ({ ...prev, [name]: value }));
+    }
   };
 
   const handleOwnerChange = (e) => {
@@ -165,6 +185,7 @@ export default function RegisterPet() {
       const list = stored ? JSON.parse(stored) : [];
       list.unshift(newPetRecord);
       localStorage.setItem('huellas_mascotas', JSON.stringify(list));
+      window.dispatchEvent(new Event('huellas_mascotas_updated'));
     } catch {
       // Ignorar error de almacenamiento
     }
@@ -371,15 +392,20 @@ export default function RegisterPet() {
 
                 <div className="hp-form-grid-2" style={{ marginTop: '0.8rem' }}>
                   <div className="form-group">
-                    <label style={{ color: '#E2E8F0', fontSize: '0.85rem', fontWeight: 600 }}>Raza</label>
-                    <input
-                      type="text"
+                    <label style={{ color: '#E2E8F0', fontSize: '0.85rem', fontWeight: 600 }}>
+                      Raza (Catálogo Normalizado) *
+                    </label>
+                    <select
                       name="raza"
-                      placeholder="Ej. Beagle, Mestizo, Siamés..."
                       value={petData.raza}
                       onChange={handlePetChange}
+                      className="form-input-clean"
                       style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255,255,255,0.15)', color: '#FFFFFF' }}
-                    />
+                    >
+                      {getRazasPorEspecie(petData.especie).map((r) => (
+                        <option key={r} value={r} style={{ background: '#0F172A', color: '#FFFFFF' }}>{r}</option>
+                      ))}
+                    </select>
                   </div>
 
                   <div className="form-group">
@@ -685,14 +711,17 @@ export default function RegisterPet() {
 
                     <div>
                       <label style={{ color: '#94A3B8', fontSize: '0.75rem', display: 'block', marginBottom: '0.3rem' }}>
-                        Detalle del Tratamiento o Vacuna
+                        Tratamiento o Vacuna (Específico para {petData.especie})
                       </label>
-                      <input
-                        type="text"
+                      <select
                         value={vaccineName}
                         onChange={(e) => setVaccineName(e.target.value)}
                         style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', background: '#0F172A', color: 'white', border: '1px solid rgba(255,255,255,0.15)' }}
-                      />
+                      >
+                        {getListaVacunasPorEspecie(petData.especie).map((vac, idx) => (
+                          <option key={idx} value={vac}>{vac}</option>
+                        ))}
+                      </select>
                     </div>
 
                     {/* BOTÓN PARA ABRIR EL CHATBOT INTERACTIVO */}
