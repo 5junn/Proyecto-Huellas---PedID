@@ -6,12 +6,14 @@ import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import Logo from '../components/Logo';
 import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
+import { isAuthenticated } from '../services/authService';
 import '../styles/landing.css';
 
 export default function Landing() {
   const [simulatorMode, setSimulatorMode] = useState('normal'); // 'normal' | 'lost'
   const [alertSent, setAlertSent] = useState(false);
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
+  const auth = isAuthenticated();
 
   const handleSimulateScan = () => {
     setAlertSent(true);
@@ -41,10 +43,21 @@ export default function Landing() {
             </p>
 
             <div className="hp-hero-actions">
-              <Link to="/registrar-mascota" className="hp-hero-btn primary">
-                <Icon name="paw" size={20} />
-                <span>Registrar Mascota Gratis</span>
-              </Link>
+              {auth ? (
+                <Link to="/registrar-mascota" className="hp-hero-btn primary" title="Registrar una nueva mascota con placa QR">
+                  <Icon name="paw" size={20} />
+                  <span>Registrar Mascota Gratis</span>
+                </Link>
+              ) : (
+                <Link
+                  to="/login?redirect=/registrar-mascota&msg=auth_required"
+                  className="hp-hero-btn primary"
+                  title="Inicia sesión o regístrate para inscribir a tu mascota"
+                >
+                  <Icon name="user" size={20} />
+                  <span>Iniciar Sesión para Registrar Mascota</span>
+                </Link>
+              )}
 
               <a href="#simulador" className="hp-hero-btn secondary">
                 <Icon name="qr" size={20} />
@@ -532,6 +545,120 @@ export default function Landing() {
                 </span>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      {/* SECCIÓN EMERGENCIAS 24/7 EN LANDING */}
+      <section id="emergencias" style={{
+        padding: '4rem 1.5rem',
+        background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.9) 0%, rgba(26, 11, 20, 0.95) 100%)',
+        borderTop: '1px solid rgba(239, 68, 68, 0.25)',
+        borderBottom: '1px solid rgba(239, 68, 68, 0.25)'
+      }}>
+        <div style={{ maxWidth: '1100px', margin: '0 auto', textAlign: 'center' }}>
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            padding: '0.35rem 0.9rem',
+            borderRadius: '999px',
+            background: 'rgba(239, 68, 68, 0.15)',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            color: '#F87171',
+            fontSize: '0.8rem',
+            fontWeight: 800,
+            marginBottom: '1rem',
+            textTransform: 'uppercase',
+            letterSpacing: '1px'
+          }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#EF4444', animation: 'pulse 1s infinite' }} />
+            Hospital de Urgencias Médicas 24/7
+          </span>
+
+          <h2 style={{ fontSize: '2.4rem', fontWeight: 900, color: '#FFFFFF', margin: '0 0 0.8rem' }}>
+            Atención Inmediata de <span style={{ color: '#F87171' }}>Emergencias Críticas</span>
+          </h2>
+
+          <p style={{ color: '#CBD5E1', maxWidth: '700px', margin: '0 auto 2rem', fontSize: '1rem', lineHeight: 1.6 }}>
+            Si tu mascota presenta vómitos continuos, dificultad para respirar, traumatismos o convulsiones, acude a nuestra sede central en Surco con médicos intensivistas de guardia permanente.
+          </p>
+
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
+            <a
+              href="tel:+51987654321"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                padding: '0.9rem 1.6rem',
+                borderRadius: '14px',
+                background: '#EF4444',
+                color: 'white',
+                fontWeight: 800,
+                fontSize: '1rem',
+                textDecoration: 'none',
+                boxShadow: '0 8px 25px rgba(239, 68, 68, 0.45)'
+              }}
+            >
+              <Icon name="phone" size={20} />
+              <span>Central 24 Horas: +51 987 654 321</span>
+            </a>
+
+            <button
+              type="button"
+              onClick={() => setIsChatbotOpen(true)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                padding: '0.9rem 1.6rem',
+                borderRadius: '14px',
+                background: '#10B981',
+                color: 'white',
+                fontWeight: 800,
+                fontSize: '1rem',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 8px 25px rgba(16, 185, 129, 0.35)'
+              }}
+            >
+              <Icon name="whatsapp" size={20} />
+              <span>Triage Inmediato HuellasBot</span>
+            </button>
+
+            <Link
+              to="/emergencias"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                padding: '0.9rem 1.6rem',
+                borderRadius: '14px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+                color: '#CBD5E1',
+                fontWeight: 700,
+                fontSize: '1rem',
+                textDecoration: 'none'
+              }}
+            >
+              <Icon name="alert" size={18} />
+              <span>Ver Guía Completa de Emergencias ↗</span>
+            </Link>
+          </div>
+
+          <div style={{
+            background: 'rgba(15, 23, 42, 0.7)',
+            border: '1px solid rgba(56, 189, 248, 0.25)',
+            borderRadius: '16px',
+            padding: '1.2rem',
+            maxWidth: '650px',
+            margin: '0 auto',
+            color: '#94A3B8',
+            fontSize: '0.86rem'
+          }}>
+            📍 <strong>Sede de Emergencias:</strong> Av. Primavera 1234, Santiago de Surco, Lima · Estacionamiento para ambulancias y clientes.
           </div>
         </div>
       </section>

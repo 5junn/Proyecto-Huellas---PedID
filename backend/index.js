@@ -23,6 +23,31 @@ try {
   console.log('Rutas de mascotas pendientes de inicialización:', e.message);
 }
 
+// Rutas de Razas Normalizadas (Requisito Académico Oficial Huellas PetID)
+try {
+  app.use('/api/razas', require('./src/routes/razas.routes'));
+} catch (e) {
+  console.log('Rutas de razas pendientes de inicialización:', e.message);
+}
+
+// Endpoint para detectar la IP de red local (Permite escanear con celular en el mismo Wi-Fi)
+const os = require('os');
+app.get('/api/network-ip', (req, res) => {
+  const nets = os.networkInterfaces();
+  let localIp = '10.165.139.250';
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name]) {
+      if (net.family === 'IPv4' && !net.internal) {
+        if (name.toLowerCase().includes('wi-fi') || name.toLowerCase().includes('wlan')) {
+          localIp = net.address;
+          break;
+        }
+      }
+    }
+  }
+  res.json({ ip: localIp });
+});
+
 // Endpoint de Lógica de Negocio: Recordatorios por WhatsApp (Integración API Externa)
 app.post('/api/reminders/whatsapp', (req, res) => {
   const { recipient, petName, ownerName, reminderType, dueDate, message } = req.body;

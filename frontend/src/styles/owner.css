@@ -724,28 +724,55 @@
   .hp-owner-welcome {
     flex-direction: column;
     align-items: flex-start;
+    gap: 1.2rem;
+  }
+
+  .hp-owner-welcome .hp-welcome-actions {
+    width: 100%;
+  }
+
+  .hp-owner-welcome .hp-btn-add-pet {
+    width: 100%;
+    justify-content: center;
   }
 
   .hp-owner-clinic-card {
     flex-direction: column;
     align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .hp-pets-grid {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
 @media (max-width: 640px) {
+  .hp-owner-container {
+    padding: 0 1rem;
+  }
+
   .hp-pets-grid {
     grid-template-columns: 1fr;
   }
 
   .hp-pet-card-top {
     flex-direction: column;
+    align-items: flex-start;
+    gap: 0.8rem;
   }
 
   .hp-pet-actions-row {
     grid-template-columns: 1fr;
+    gap: 0.5rem;
   }
 
   .hp-form-grid-2 {
     grid-template-columns: 1fr;
+  }
+
+  .hp-modal-content {
+    max-width: 95vw !important;
+    padding: 1.2rem !important;
   }
 }

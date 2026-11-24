@@ -13,10 +13,33 @@ export default function CollarQRTag({
   const [realQrDataUrl, setRealQrDataUrl] = useState('');
   const [generating, setGenerating] = useState(true);
 
+  // Detección de host de red local para que el celular abra la página al escanear
+  const [networkHost, setNetworkHost] = useState(() => {
+    if (typeof window !== 'undefined') {
+      if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+        return window.location.host;
+      }
+    }
+    return '10.165.139.250:5173';
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      fetch('http://localhost:4000/api/network-ip')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.ip && data.ip !== 'localhost') {
+            setNetworkHost(`${data.ip}:5173`);
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
   if (!pet) return null;
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173';
-  const qrTargetUrl = `${origin}/pet/${pet.codigoQR || 'HP-4092'}`;
+  const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
+  const qrTargetUrl = `${protocol}//${networkHost}/pet/${pet.codigoQR || 'HP-4092'}`;
 
   // Generación matemática de Código QR 100% Real y Escaneable (Nivel de corrección H)
   useEffect(() => {
@@ -151,14 +174,26 @@ export default function CollarQRTag({
 
           {/* CÓDIGO QR REAL GENERADO */}
           <div
+            onClick={() => {
+              if (onScanSimulate) {
+                onScanSimulate();
+              } else {
+                window.open(qrTargetUrl, '_blank');
+              }
+            }}
+            title="Haz clic para escanear y abrir la ficha médica oficial"
             style={{
               background: '#FFFFFF',
               padding: '8px',
               borderRadius: '16px',
               display: 'inline-block',
               boxShadow: '0 8px 16px rgba(0,0,0,0.3)',
-              margin: '0.3rem 0'
+              margin: '0.3rem 0',
+              cursor: 'pointer',
+              transition: 'transform 0.2s ease',
             }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.03)')}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}
           >
             {realQrDataUrl ? (
               <img
@@ -202,14 +237,27 @@ export default function CollarQRTag({
               fontWeight: 800
             }}
           >
-            <span>✓ QR Real y Escaneable</span>
+            <span>✓ QR Real y Escaneable (Toca para Abrir)</span>
           </div>
 
           <div style={{ marginTop: '0.3rem', fontSize: '0.78rem', fontWeight: 800, color: '#F8FAFC' }}>
             ID: <span style={{ color: '#38BDF8' }}>{pet.codigoQR || 'HP-4092'}</span>
           </div>
 
-          <div style={{ fontSize: '0.65rem', color: '#94A3B8', marginTop: '0.15rem' }}>
+          <div style={{
+            fontSize: '0.62rem',
+            color: '#38BDF8',
+            marginTop: '0.25rem',
+            wordBreak: 'break-all',
+            padding: '0.15rem 0.4rem',
+            background: 'rgba(56, 189, 248, 0.1)',
+            borderRadius: '6px',
+            border: '1px solid rgba(56, 189, 248, 0.2)'
+          }}>
+            📡 Móvil / Wi-Fi: {qrTargetUrl}
+          </div>
+
+          <div style={{ fontSize: '0.65rem', color: '#94A3B8', marginTop: '0.2rem' }}>
             Clínica Veterinaria Huellas
           </div>
         </div>
@@ -218,6 +266,30 @@ export default function CollarQRTag({
       {/* ACCIONES Y BOTONES */}
       {showActions && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '360px', margin: '1rem auto 0' }}>
+          <a
+            href={qrTargetUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              padding: '0.75rem 1rem',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+              color: '#FFFFFF',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              textDecoration: 'none',
+              boxShadow: '0 6px 16px rgba(16, 185, 129, 0.35)',
+              cursor: 'pointer'
+            }}
+          >
+            <Icon name="qr" size={18} />
+            <span>📱 Escanear Placa QR (Abrir Ficha Oficial ↗)</span>
+          </a>
+
           {onScanSimulate && (
             <button
               type="button"
@@ -227,19 +299,18 @@ export default function CollarQRTag({
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                padding: '0.75rem 1rem',
+                padding: '0.65rem 1rem',
                 borderRadius: '12px',
-                background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-                color: '#FFFFFF',
-                fontWeight: 700,
-                fontSize: '0.88rem',
-                border: 'none',
-                cursor: 'pointer',
-                boxShadow: '0 6px 16px rgba(16, 185, 129, 0.35)'
+                background: 'rgba(56, 189, 248, 0.12)',
+                color: '#38BDF8',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                fontWeight: 600,
+                fontSize: '0.82rem',
+                cursor: 'pointer'
               }}
             >
-              <Icon name="qr" size={18} />
-              <span>📱 Simular Escaneo (Ver Ficha Habitual/Control)</span>
+              <Icon name="clipboard" size={16} />
+              <span>Ver Ficha Habitual / Control en esta ventana</span>
             </button>
           )}
 

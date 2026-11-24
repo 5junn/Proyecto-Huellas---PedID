@@ -52,10 +52,10 @@ export default function Navbar() {
           <a href="/#como-funciona" className="hp-nav-item">
             Cómo Funciona
           </a>
-          <a href="/#emergencias" className="hp-nav-item hp-nav-badge-link">
+          <Link to="/emergencias" className={`hp-nav-item hp-nav-badge-link ${location.pathname === '/emergencias' ? 'active' : ''}`}>
             <span className="hp-pulse-dot" />
-            Emergencias
-          </a>
+            Emergencias 24/7
+          </Link>
         </nav>
 
         {/* Acciones y Autenticación */}
@@ -137,10 +137,10 @@ export default function Navbar() {
               <Icon name="spark" size={20} />
               <span>Cómo Funciona</span>
             </a>
-            <a href="/#emergencias" onClick={closeMenu} className="hp-mobile-item danger">
+            <Link to="/emergencias" onClick={closeMenu} className="hp-mobile-item danger">
               <Icon name="alert" size={20} />
               <span>Red de Emergencias 24/7</span>
-            </a>
+            </Link>
 
             <div className="hp-mobile-divider" />
 

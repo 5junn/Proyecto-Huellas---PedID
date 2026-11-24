@@ -5,6 +5,7 @@ import { getUser, logout } from '../services/authService';
 import Logo from '../components/Logo';
 import Icon from '../components/Icon';
 import { Spark, BarChart, Donut } from '../components/Charts';
+import { getRazasPorEspecie } from '../data/razasData';
 import {
   KPIS,
   WEEK,
@@ -59,13 +60,54 @@ const SECTIONS = {
 const STATUS_TEXT = { done: 'Atendida', progress: 'En curso', waiting: 'En espera' };
 const STATUS_CLASS = { done: 'ok', progress: 'warn', waiting: 'danger' };
 
+const loadMergedMascotas = () => {
+  try {
+    const stored = localStorage.getItem('huellas_mascotas');
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const storedMapped = parsed.map((p, idx) => ({
+          id: p.id || `M-${200 + idx}`,
+          nombre: p.nombre,
+          especie: (p.especie?.toLowerCase().includes('fel') || p.especie?.toLowerCase().includes('gato')) ? 'Felino' : 'Canino',
+          raza: p.raza || 'Mestizo',
+          sexo: p.sexo || 'Macho',
+          edad: p.edad || '1 año',
+          peso: p.peso || '10 kg',
+          propietario: p.propietario || 'Propietario Huellas',
+          telefono: p.telefono || '987 654 321',
+          codigoQR: p.codigoQR || p.codigo || `HP-${Math.floor(1000 + Math.random() * 9000)}`,
+          estado: p.estadoExtravio ? 'Extraviado' : 'Activo',
+          chip: p.chip || ('981' + Math.floor(100000 + Math.random() * 900000)),
+          foto: p.foto,
+          alergias: p.alergias
+        }));
+
+        const existingQrs = new Set(storedMapped.map((m) => m.codigoQR?.toUpperCase()));
+        const clinicLeftovers = MASCOTAS_CLINICA.filter((m) => !existingQrs.has(m.codigoQR?.toUpperCase()));
+        return [...storedMapped, ...clinicLeftovers];
+      }
+    }
+  } catch (err) {
+    console.error('Error cargando mascotas en Dashboard:', err);
+  }
+  return MASCOTAS_CLINICA;
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const initialUser = getUser() || { nombres: 'Dra. Ana Torres', rol: 'Veterinario', correo: 'veterinario@huellas.com' };
   
   // Estado del usuario activo (permite simular roles fácilmente para pruebas)
   const [currentUser, setCurrentUser] = useState(initialUser);
-  const [activeTab, setActiveTab] = useState('inicio');
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('tab') || 'inicio';
+    } catch {
+      return 'inicio';
+    }
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [chartRange, setChartRange] = useState('week');
   const [searchTerm, setSearchTerm] = useState('');
@@ -73,7 +115,7 @@ export default function Dashboard() {
 
   // Listas interactivas
   const [consultas, setConsultas] = useState(CONSULTS);
-  const [mascotas, _setMascotas] = useState(MASCOTAS_CLINICA);
+  const [mascotas, setMascotas] = useState(loadMergedMascotas);
   const [vacunas, setVacunas] = useState(VACCINES);
   const [personal, setPersonal] = useState(USUARIOS_STAFF);
 
@@ -81,7 +123,65 @@ export default function Dashboard() {
   const [modalConsultaOpen, setModalConsultaOpen] = useState(false);
   const [modalVacunaOpen, setModalVacunaOpen] = useState(false);
   const [modalStaffOpen, setModalStaffOpen] = useState(false);
+  const [modalPetOpen, setModalPetOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [modalAlertasOpen, setModalAlertasOpen] = useState(false);
+  const [isEditingAgenda, setIsEditingAgenda] = useState(false);
+
+  // Sincronización en tiempo real de alertas GPS de rescate
+  const [gpsAlerts, setGpsAlerts] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const handleResolveGpsAlert = (alertId) => {
+    const updated = gpsAlerts.filter((a) => a.id !== alertId);
+    setGpsAlerts(updated);
+    try {
+      localStorage.setItem('huellas_alertas_gps', JSON.stringify(updated));
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.error(e);
+    }
+    showToast('Alerta de rescate GPS archivada y marcada como atendida');
+  };
+
+  // Sincronización en tiempo real de pacientes y mascotas registradas
+  React.useEffect(() => {
+    const handleSync = () => {
+      setMascotas(loadMergedMascotas());
+      try {
+        const storedGps = JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
+        setGpsAlerts(storedGps);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    window.addEventListener('storage', handleSync);
+    window.addEventListener('huellas_mascotas_updated', handleSync);
+    window.addEventListener('huellas_alerta_gps_recibida', handleSync);
+    return () => {
+      window.removeEventListener('storage', handleSync);
+      window.removeEventListener('huellas_mascotas_updated', handleSync);
+      window.removeEventListener('huellas_alerta_gps_recibida', handleSync);
+    };
+  }, []);
+
+  // Formulario de nueva mascota en recepción
+  const [formPet, setFormPet] = useState({
+    nombre: '',
+    especie: 'Canino',
+    raza: 'Beagle',
+    propietario: '',
+    telefono: '987 654 321',
+    sexo: 'Macho',
+    edad: '1 año',
+    peso: '12',
+    alergias: ''
+  });
 
   // Formularios
   const [formConsulta, setFormConsulta] = useState({
@@ -167,6 +267,18 @@ export default function Dashboard() {
     showToast(`Consulta registrada exitosamente para ${nueva.pet}`);
   };
 
+  const handleChangeConsultaStatus = (id, newStatus) => {
+    setConsultas((prev) =>
+      prev.map((c) => {
+        if ((c.id && c.id === id) || c.pet === id) {
+          return { ...c, status: newStatus };
+        }
+        return c;
+      })
+    );
+    showToast(`Estado actualizado: "${STATUS_TEXT[newStatus] || newStatus}" para la cita`);
+  };
+
   const handleCreateVacuna = (e) => {
     e.preventDefault();
     if (!formVacuna.pet) return;
@@ -184,6 +296,64 @@ export default function Dashboard() {
     setVacunas([nueva, ...vacunas]);
     setModalVacunaOpen(false);
     showToast(`Dosis de ${nueva.vaccine} aplicada a ${nueva.pet}`);
+  };
+
+  const handleCreatePetReception = (e) => {
+    e.preventDefault();
+    if (!formPet.nombre.trim()) return;
+
+    const newCode = 'HP-' + Math.floor(1000 + Math.random() * 9000);
+    const newPetRecord = {
+      id: newCode.toLowerCase(),
+      nombre: formPet.nombre,
+      especie: formPet.especie,
+      raza: formPet.raza || 'Mestizo',
+      sexo: formPet.sexo,
+      edad: formPet.edad || '1 año',
+      peso: formPet.peso ? `${formPet.peso} kg` : '10 kg',
+      propietario: formPet.propietario || 'Propietario Huellas',
+      telefono: formPet.telefono || '987 654 321',
+      codigoQR: newCode,
+      estadoExtravio: false,
+      foto: formPet.especie === 'Felino'
+        ? 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80'
+        : 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80',
+      alergias: formPet.alergias.trim() || 'Sin alergias reportadas.',
+      vacunas: [
+        {
+          nombre: 'Control Inicial Clínico',
+          fecha: 'Hoy',
+          proxima: 'En 30 días',
+          estado: 'Vigente',
+          vet: currentUser.nombres || 'Dra. Ana Torres'
+        }
+      ]
+    };
+
+    try {
+      const stored = localStorage.getItem('huellas_mascotas');
+      const list = stored ? JSON.parse(stored) : [];
+      list.unshift(newPetRecord);
+      localStorage.setItem('huellas_mascotas', JSON.stringify(list));
+      window.dispatchEvent(new Event('huellas_mascotas_updated'));
+    } catch (err) {
+      console.error(err);
+    }
+
+    setMascotas(loadMergedMascotas());
+    setModalPetOpen(false);
+    setFormPet({
+      nombre: '',
+      especie: 'Canino',
+      raza: 'Beagle',
+      propietario: '',
+      telefono: '987 654 321',
+      sexo: 'Macho',
+      edad: '1 año',
+      peso: '12',
+      alergias: ''
+    });
+    showToast(`¡Paciente ${newPetRecord.nombre} registrado con placa QR ${newCode}! Sincronizado para el propietario y recepción.`);
   };
 
   const handleCreateStaff = (e) => {
@@ -308,9 +478,194 @@ export default function Dashboard() {
             />
           </label>
 
-          <button className="icon-btn has-dot" aria-label="Notificaciones" title="Alertas de la clínica">
-            <Icon name="bell" size={18} />
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button
+              className={`icon-btn ${gpsAlerts.length > 0 || mascotas.some((m) => m.estadoExtravio) ? 'has-dot' : ''}`}
+              aria-label="Notificaciones"
+              title="Alertas de la clínica"
+              onClick={() => setModalAlertasOpen(!modalAlertasOpen)}
+            >
+              <Icon name="bell" size={18} />
+            </button>
+
+            {/* PANEL DESPLEGABLE DE ALERTAS CLÍNICAS */}
+            {modalAlertasOpen && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '120%',
+                  right: 0,
+                  width: '360px',
+                  maxWidth: '90vw',
+                  background: '#141C2C',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  borderRadius: '16px',
+                  boxShadow: '0 20px 40px rgba(0, 0, 0, 0.6), 0 0 20px rgba(56, 189, 248, 0.2)',
+                  zIndex: 9999,
+                  overflow: 'hidden'
+                }}
+              >
+                <div style={{
+                  padding: '1rem 1.2rem',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'rgba(255, 255, 255, 0.03)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Icon name="bell" size={18} />
+                    <strong style={{ color: '#FFFFFF', fontSize: '0.92rem' }}>Centro de Alertas Clínicas</strong>
+                  </div>
+                  <button
+                    onClick={() => setModalAlertasOpen(false)}
+                    style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer' }}
+                  >
+                    <Icon name="close" size={16} />
+                  </button>
+                </div>
+
+                <div style={{ maxHeight: '340px', overflowY: 'auto', padding: '0.8rem' }}>
+                  {/* Alertas de Mascota Perdida / GPS */}
+                  {mascotas.filter((m) => m.estadoExtravio).map((lostPet) => (
+                    <div
+                      key={lostPet.id || lostPet.codigoQR}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        borderRadius: '10px',
+                        padding: '0.75rem',
+                        marginBottom: '0.6rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#F87171', fontWeight: 700, fontSize: '0.82rem' }}>
+                        <Icon name="alert" size={15} />
+                        <span>Mascota Extraviada: {lostPet.nombre}</span>
+                      </div>
+                      <p style={{ margin: '0.3rem 0 0.5rem', fontSize: '0.76rem', color: '#CBD5E1' }}>
+                        Placa {lostPet.codigoQR || lostPet.id} · Dueño: {lostPet.propietario}
+                      </p>
+                      <Link
+                        to={`/pet/${lostPet.codigoQR || lostPet.id}`}
+                        onClick={() => setModalAlertasOpen(false)}
+                        style={{
+                          display: 'inline-block',
+                          color: '#38BDF8',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        Ver Ficha QR de Rescate →
+                      </Link>
+                    </div>
+                  ))}
+
+                  {/* Consultas en Espera */}
+                  {consultas.filter((c) => c.status === 'waiting').length > 0 && (
+                    <div
+                      style={{
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                        borderRadius: '10px',
+                        padding: '0.75rem',
+                        marginBottom: '0.6rem'
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#FBBF24', fontWeight: 700, fontSize: '0.82rem' }}>
+                        <Icon name="clipboard" size={15} />
+                        <span>{consultas.filter((c) => c.status === 'waiting').length} Pacientes en Espera</span>
+                      </div>
+                      <p style={{ margin: '0.3rem 0 0.5rem', fontSize: '0.76rem', color: '#CBD5E1' }}>
+                        Hay citas programadas pendientes de atención en triaje médico.
+                      </p>
+                      <button
+                        onClick={() => {
+                          setModalAlertasOpen(false);
+                          go('consultas');
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#FBBF24',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          padding: 0,
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        Ir a Triaje y Consultas →
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Vacunas Próximas */}
+                  <div
+                    style={{
+                      background: 'rgba(56, 189, 248, 0.1)',
+                      border: '1px solid rgba(56, 189, 248, 0.25)',
+                      borderRadius: '10px',
+                      padding: '0.75rem'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#38BDF8', fontWeight: 700, fontSize: '0.82rem' }}>
+                      <Icon name="shield" size={15} />
+                      <span>Campañas & Vacunación</span>
+                    </div>
+                    <p style={{ margin: '0.3rem 0 0.5rem', fontSize: '0.76rem', color: '#CBD5E1' }}>
+                      Revisa los carnets de pacientes con refuerzos programados para este mes.
+                    </p>
+                    <button
+                      onClick={() => {
+                        setModalAlertasOpen(false);
+                        go('vacunas');
+                      }}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#38BDF8',
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        padding: 0,
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      Ver Carnets de Vacunación →
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{
+                  padding: '0.75rem 1rem',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                  background: 'rgba(0, 0, 0, 0.2)',
+                  display: 'flex',
+                  justifyContent: 'flex-end'
+                }}>
+                  <button
+                    onClick={() => {
+                      setModalAlertasOpen(false);
+                      showToast('Todas las alertas marcadas como revisadas');
+                    }}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.15)',
+                      color: '#E2E8F0',
+                      borderRadius: '8px',
+                      padding: '0.35rem 0.8rem',
+                      fontSize: '0.76rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Marcar como Leídas
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </header>
 
         {/* TOAST DE FEEDBACK */}
@@ -378,6 +733,86 @@ export default function Dashboard() {
             </div>
           </section>
 
+          {/* BANNER DE ALERTA GPS DE RESCATE EN TIEMPO REAL PARA EL PERSONAL CLÍNICO */}
+          {gpsAlerts.length > 0 && (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.22) 0%, rgba(185, 28, 28, 0.3) 100%)',
+              border: '1.5px solid #EF4444',
+              borderRadius: '16px',
+              padding: '1.1rem 1.4rem',
+              marginBottom: '1.3rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              flexWrap: 'wrap',
+              boxShadow: '0 8px 24px rgba(239, 68, 68, 0.25)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.8rem' }}>
+                <span style={{
+                  background: '#EF4444',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '38px',
+                  height: '38px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  boxShadow: '0 0 12px rgba(239, 68, 68, 0.8)'
+                }}>
+                  <Icon name="alert" size={20} />
+                </span>
+                <div>
+                  <strong style={{ color: '#FCA5A5', fontSize: '0.98rem', display: 'block' }}>
+                    🚨 ¡REPORTE DE MASCOTA EXTRAVIADA CON GPS ACTIVO! ({gpsAlerts[0].nombreMascota})
+                  </strong>
+                  <span style={{ color: '#E2E8F0', fontSize: '0.82rem' }}>
+                    Placa {gpsAlerts[0].codigoMascota} · Dueño: {gpsAlerts[0].propietario} ({gpsAlerts[0].telefono}) · Coordenadas: {gpsAlerts[0].lat}, {gpsAlerts[0].lng} (±{gpsAlerts[0].precision}) · {gpsAlerts[0].fechaCompleta}
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                <a
+                  href={gpsAlerts[0].mapsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    background: '#2563EB',
+                    color: 'white',
+                    padding: '0.55rem 0.95rem',
+                    borderRadius: '10px',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)'
+                  }}
+                >
+                  <Icon name="pin" size={16} />
+                  <span>Ver Ubicación en Maps</span>
+                </a>
+                <button
+                  onClick={() => handleResolveGpsAlert(gpsAlerts[0].id)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.12)',
+                    border: '1px solid rgba(255, 255, 255, 0.25)',
+                    color: 'white',
+                    padding: '0.55rem 0.85rem',
+                    borderRadius: '10px',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Resolver Alerta
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* VISTA 1: INICIO (RESUMEN GENERAL) */}
           {currentNav.id === 'inicio' && (
             <>
@@ -398,16 +833,22 @@ export default function Dashboard() {
                 ))}
               </section>
 
-              {/* ALERTA DE MASCOTA EXTRAVIADA DETECTADA */}
-              <section className="strip" role="status">
-                <span className="strip-ico"><Icon name="alert" size={20} /></span>
-                <p>
-                  <strong>Modo Mascota Extraviada Activo.</strong> Toby (Beagle #HP-4092) fue escaneado en Miraflores. El sistema notificó automáticamente al propietario Jorge Salas vía WhatsApp.
-                </p>
-                <Link to="/pet/HP-4092" className="btn btn-outline sm">
-                  Ver Ficha QR
-                </Link>
-              </section>
+              {/* ALERTA DE MASCOTA EXTRAVIADA DETECTADA (SOLO SI HAY MASCOTAS EN MODO PERDIDO) */}
+              {mascotas.some((m) => m.estadoExtravio) && (
+                <>
+                  {mascotas.filter((m) => m.estadoExtravio).map((lostPet) => (
+                    <section className="strip" role="status" key={lostPet.id || lostPet.codigoQR}>
+                      <span className="strip-ico"><Icon name="alert" size={20} /></span>
+                      <p>
+                        <strong>Modo Mascota Extraviada Activo.</strong> {lostPet.nombre} ({lostPet.raza || lostPet.especie} #{lostPet.codigoQR || lostPet.id}) fue reportado como extraviado. El sistema notificó automáticamente al propietario {lostPet.propietario} vía WhatsApp.
+                      </p>
+                      <Link to={`/pet/${lostPet.codigoQR || lostPet.id}`} className="btn btn-outline sm">
+                        Ver Ficha QR
+                      </Link>
+                    </section>
+                  ))}
+                </>
+              )}
 
               {/* GRÁFICOS */}
               <section className="grid-2-1">
@@ -542,14 +983,129 @@ export default function Dashboard() {
                           <td>{c.vet}</td>
                           <td className="num">{c.time}</td>
                           <td>
-                            <span className={`chip ${c.status}`}>
-                              {STATUS_TEXT[c.status] || c.status}
-                            </span>
+                            {isEditingAgenda ? (
+                              <select
+                                value={c.status}
+                                onChange={(e) => handleChangeConsultaStatus(c.id || c.pet, e.target.value)}
+                                style={{
+                                  padding: '0.28rem 0.6rem',
+                                  borderRadius: '8px',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  border: '1px solid rgba(255, 255, 255, 0.25)',
+                                  background: c.status === 'done' ? '#065F46' : c.status === 'progress' ? '#92400E' : '#7F1D1D',
+                                  color: '#FFFFFF',
+                                  outline: 'none'
+                                }}
+                              >
+                                <option value="waiting" style={{ background: '#1F2937' }}>⏳ En espera</option>
+                                <option value="progress" style={{ background: '#1F2937' }}>⚡ En curso</option>
+                                <option value="done" style={{ background: '#1F2937' }}>✓ Atendida</option>
+                              </select>
+                            ) : (
+                              <span
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  padding: '0.25rem 0.65rem',
+                                  borderRadius: '8px',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 700,
+                                  background: c.status === 'done' ? 'rgba(16, 185, 129, 0.18)' : c.status === 'progress' ? 'rgba(245, 158, 11, 0.18)' : 'rgba(239, 68, 68, 0.18)',
+                                  border: c.status === 'done' ? '1px solid #10B981' : c.status === 'progress' ? '1px solid #F59E0B' : '1px solid #EF4444',
+                                  color: c.status === 'done' ? '#34D399' : c.status === 'progress' ? '#FBBF24' : '#F87171'
+                                }}
+                              >
+                                {c.status === 'done' ? '✓ Atendida' : c.status === 'progress' ? '⚡ En curso' : '⏳ En espera'}
+                              </span>
+                            )}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                {/* BOTONES DE EDITAR Y GUARDAR ESTADOS DE AGENDA */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'flex-end',
+                  gap: '0.8rem',
+                  padding: '1rem 1.4rem',
+                  borderTop: '1px solid rgba(255, 255, 255, 0.08)'
+                }}>
+                  {!isEditingAgenda ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingAgenda(true)}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        background: '#2563EB',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '0.55rem 1.1rem',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        boxShadow: '0 4px 12px rgba(37, 99, 235, 0.35)'
+                      }}
+                    >
+                      <Icon name="clipboard" size={15} />
+                      <span>Editar Estados</span>
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingAgenda(false)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          background: 'rgba(255, 255, 255, 0.1)',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          color: '#CBD5E1',
+                          borderRadius: '8px',
+                          padding: '0.5rem 0.9rem',
+                          fontSize: '0.82rem',
+                          fontWeight: 600,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <span>Cancelar</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsEditingAgenda(false);
+                          showToast('✓ Estados de la agenda médica actualizados y guardados correctamente');
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          background: '#10B981',
+                          color: '#FFFFFF',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '0.55rem 1.15rem',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)'
+                        }}
+                      >
+                        <Icon name="check" size={15} />
+                        <span>Guardar Cambios</span>
+                      </button>
+                    </>
+                  )}
                 </div>
               </article>
             </>
@@ -588,6 +1144,28 @@ export default function Dashboard() {
                       onClick={() => setStatusFilter('Felino')}
                     >
                       Felinos
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setModalPetOpen(true)}
+                      style={{
+                        marginLeft: 'auto',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        padding: '0.45rem 0.9rem',
+                        background: '#0284C7',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '999px',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Icon name="plus" size={14} />
+                      <span>+ Registrar Paciente QR</span>
                     </button>
                   </div>
                 </div>
@@ -727,9 +1305,25 @@ export default function Dashboard() {
                           <td><span style={{ fontSize: '0.82rem', color: '#9CA3AF' }}>{c.diagnostico}</span></td>
                           <td>{c.vet}</td>
                           <td>
-                            <span className={`mgmt-badge ${STATUS_CLASS[c.status] || 'ok'}`}>
-                              {STATUS_TEXT[c.status] || c.status}
-                            </span>
+                            <select
+                              value={c.status}
+                              onChange={(e) => handleChangeConsultaStatus(c.id || c.pet, e.target.value)}
+                              style={{
+                                padding: '0.3rem 0.65rem',
+                                borderRadius: '8px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                                border: '1px solid rgba(255, 255, 255, 0.25)',
+                                background: c.status === 'done' ? '#065F46' : c.status === 'progress' ? '#92400E' : '#7F1D1D',
+                                color: '#FFFFFF',
+                                outline: 'none'
+                              }}
+                            >
+                              <option value="waiting" style={{ background: '#1F2937' }}>⏳ En espera</option>
+                              <option value="progress" style={{ background: '#1F2937' }}>⚡ En curso</option>
+                              <option value="done" style={{ background: '#1F2937' }}>✓ Atendida</option>
+                            </select>
                           </td>
                         </tr>
                       ))}
@@ -1271,6 +1865,168 @@ export default function Dashboard() {
                 </button>
                 <button type="submit" className="btn-staff-primary">
                   <Icon name="check" size={16} /> Emitir Credenciales
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: REGISTRAR PACIENTE QR (RECEPCIÓN & ADMIN) */}
+      {modalPetOpen && (
+        <div className="staff-modal-overlay" onClick={() => setModalPetOpen(false)}>
+          <div className="staff-modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '580px' }}>
+            <div className="staff-modal-header">
+              <div>
+                <h3>Registrar Paciente con Placa QR</h3>
+                <span style={{ fontSize: '0.75rem', color: '#9CA3AF' }}>
+                  Sincronización en tiempo real con el portal del propietario
+                </span>
+              </div>
+              <button onClick={() => setModalPetOpen(false)} style={{ color: '#9CA3AF', background: 'transparent', border: 'none', cursor: 'pointer' }}>
+                <Icon name="close" size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleCreatePetReception}>
+              <div className="staff-modal-body">
+                <div className="staff-modal-form-grid">
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Nombre del Paciente *
+                    </label>
+                    <input
+                      className="staff-input-field"
+                      required
+                      placeholder="Ej. Balto, Misi, Toby..."
+                      value={formPet.nombre}
+                      onChange={(e) => setFormPet({ ...formPet, nombre: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Propietario Responsable *
+                    </label>
+                    <input
+                      className="staff-input-field"
+                      required
+                      placeholder="Ej. Lucía Paredes"
+                      value={formPet.propietario}
+                      onChange={(e) => setFormPet({ ...formPet, propietario: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="staff-modal-form-grid">
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Especie
+                    </label>
+                    <select
+                      className="staff-input-field"
+                      value={formPet.especie}
+                      onChange={(e) => {
+                        const esp = e.target.value;
+                        const rList = getRazasPorEspecie(esp);
+                        setFormPet({ ...formPet, especie: esp, raza: rList[0] || 'Mestizo' });
+                      }}
+                    >
+                      <option value="Canino">Canino (Perro)</option>
+                      <option value="Felino">Felino (Gato)</option>
+                      <option value="Conejo">Conejo</option>
+                      <option value="Ave">Ave</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Raza (Catálogo Normalizado) *
+                    </label>
+                    <select
+                      className="staff-input-field"
+                      value={formPet.raza}
+                      onChange={(e) => setFormPet({ ...formPet, raza: e.target.value })}
+                    >
+                      {getRazasPorEspecie(formPet.especie).map((r) => (
+                        <option key={r} value={r} style={{ background: '#0F172A', color: '#FFFFFF' }}>{r}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="staff-modal-form-grid">
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Teléfono de Contacto Propietario *
+                    </label>
+                    <input
+                      className="staff-input-field"
+                      required
+                      placeholder="Ej. 987 654 321"
+                      value={formPet.telefono}
+                      onChange={(e) => setFormPet({ ...formPet, telefono: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Sexo
+                    </label>
+                    <select
+                      className="staff-input-field"
+                      value={formPet.sexo}
+                      onChange={(e) => setFormPet({ ...formPet, sexo: e.target.value })}
+                    >
+                      <option value="Macho">Macho</option>
+                      <option value="Hembra">Hembra</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="staff-modal-form-grid">
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Edad Aproximada
+                    </label>
+                    <input
+                      className="staff-input-field"
+                      placeholder="Ej. 2 años"
+                      value={formPet.edad}
+                      onChange={(e) => setFormPet({ ...formPet, edad: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                      Peso (kg)
+                    </label>
+                    <input
+                      className="staff-input-field"
+                      type="number"
+                      step="0.1"
+                      placeholder="Ej. 11.5"
+                      value={formPet.peso}
+                      onChange={(e) => setFormPet({ ...formPet, peso: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
+                    Alergias / Observaciones Médicas
+                  </label>
+                  <input
+                    className="staff-input-field"
+                    placeholder="Ej. Alergia a picadura de pulgas, sensibilidad estomacal..."
+                    value={formPet.alergias}
+                    onChange={(e) => setFormPet({ ...formPet, alergias: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="staff-modal-footer">
+                <button type="button" className="btn-staff-secondary" onClick={() => setModalPetOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="submit" className="btn-staff-primary">
+                  <Icon name="check" size={16} /> Registrar y Emitir Placa QR
                 </button>
               </div>
             </form>
