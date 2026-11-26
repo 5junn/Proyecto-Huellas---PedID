@@ -1,0 +1,146 @@
+name: 3. Seguridad DevSecOps (Secretos, SCA, SBOM y Workflows)
+
+on:
+  push:
+    branches:
+      - main
+      - desarrollo
+      - "desarrollo_*"
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Auditoria semanal todos los lunes a las 06:30 UTC
+    - cron: "30 6 * * 1"
+  workflow_dispatch:
+
+# Principio de menor privilegio: sin permisos globales por defecto
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scanning:
+    name: Deteccion de Secretos (TruffleHog)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Endurecer entorno de ejecucion (Harden-Runner)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Descargar historial completo del repositorio
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Escanear secretos y credenciales en codigo e historial
+        uses: trufflesecurity/trufflehog@31ce31ee1abbcc7dc8eee5764c17121c3044c8b2 # v3.99.7
+        with:
+          path: ./
+          extra_args: --results=verified,unknown
+
+  dependency-audit-sbom:
+    name: Auditoria SCA y SBOM (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ["frontend", "backend"]
+    steps:
+      - name: Endurecer entorno de ejecucion (Harden-Runner)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Descargar codigo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+
+      - name: Auditar vulnerabilidades con npm audit (High/Critical)
+        env:
+          PACKAGE_DIR: ${{ matrix.package }}
+        run: |
+          cd "$PACKAGE_DIR"
+          echo "## Auditoria SCA - ${PACKAGE_DIR}" >> "$GITHUB_STEP_SUMMARY"
+          npm audit --audit-level=high
+
+      - name: Generar SBOM en formato CycloneDX
+        env:
+          PACKAGE_DIR: ${{ matrix.package }}
+        run: |
+          cd "$PACKAGE_DIR"
+          npm sbom --package-lock-only --sbom-format cyclonedx > "sbom-${PACKAGE_DIR}.cdx.json"
+
+      - name: Subir artefacto SBOM CycloneDX
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ matrix.package }}-cyclonedx
+          path: ${{ matrix.package }}/sbom-${{ matrix.package }}.cdx.json
+          retention-days: 14
+
+  dependency-review:
+    name: Revision de Dependencias y Licencias (PR)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Endurecer entorno de ejecucion (Harden-Runner)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Descargar codigo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Revisar nuevas dependencias vulnerables o licencias restringidas
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+          deny-licenses: GPL-2.0, GPL-3.0, AGPL-3.0
+          comment-summary-in-pr: always
+
+  workflow-security-lint:
+    name: Auditoria de Seguridad de Workflows (Zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Endurecer entorno de ejecucion (Harden-Runner)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+
+      - name: Descargar codigo
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Analizar seguridad de .github/workflows con Zizmor
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
+        with:
+          advanced-security: false
+          annotations: true
+          min-severity: medium
+          online-audits: false

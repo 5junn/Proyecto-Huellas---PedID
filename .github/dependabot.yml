@@ -1,0 +1,43 @@
+# Dependabot: actualizaciones automaticas de seguridad para dependencias npm y GitHub Actions
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Lima"
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+      - "security"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Lima"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(frontend-deps)"
+    labels:
+      - "dependencies"
+      - "frontend"
+
+  - package-ecosystem: "npm"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "America/Lima"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(backend-deps)"
+    labels:
+      - "dependencies"
+      - "backend"

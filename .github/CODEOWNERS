@@ -1,0 +1,5 @@
+# Propietarios obligatorios para revision de cambios criticos de seguridad y arquitectura
+* @5junn
+/.github/ @5junn
+/backend/ @5junn
+/frontend/ @5junn

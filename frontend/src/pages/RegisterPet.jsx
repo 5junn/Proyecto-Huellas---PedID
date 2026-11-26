@@ -8,6 +8,7 @@ import CollarQRTag from '../components/CollarQRTag';
 import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
 import { scheduleWhatsAppReminder } from '../services/whatsappService';
 import { getUser, isAuthenticated } from '../services/authService';
+import { apiFetch } from '../services/apiClient';
 import { getRazasPorEspecie } from '../data/razasData';
 import { getVacunaSugerida, getListaVacunasPorEspecie } from '../data/vacunasData';
 import '../styles/landing.css';
@@ -167,9 +168,48 @@ export default function RegisterPet() {
       ]
     };
 
-    // Si activó el recordatorio de WhatsApp, programarlo
+    // Guardar mascota + vacuna + recordatorio en MySQL
+    let dbSaved = null;
+    try {
+      dbSaved = await apiFetch('/mascotas', {
+        method: 'POST',
+        body: JSON.stringify({
+          id_propietario: currentUser?.id_propietario || null,
+          codigo_qr: generatedCode,
+          nombre: petData.nombre,
+          especie: petData.especie,
+          raza: petData.raza || 'Mestizo',
+          sexo: petData.sexo,
+          edad: petData.edad || '1 año',
+          peso_actual: petData.peso || null,
+          color: petData.color || 'Varios',
+          foto_url: petData.foto,
+          alergias: newPetRecord.alergias,
+          propietario_nombre: ownerData.nombres || currentUser?.nombres || 'Propietario Huellas',
+          propietario_dni: ownerData.dni || currentUser?.dni || '',
+          propietario_telefono: ownerData.telefono || currentUser?.telefono || '987654321',
+          propietario_correo: ownerData.correo || currentUser?.correo || '',
+          propietario_direccion: currentUser?.direccion || 'Lima, Perú',
+          vacuna_inicial: vaccineName,
+          reminderDays: Number(reminderDays) || 30,
+          programar_recordatorio: Boolean(enableWhatsAppReminder)
+        })
+      });
+    } catch (apiErr) {
+      console.warn('Backend offline al registrar mascota, usando caché local:', apiErr.message);
+    }
+
+    if (dbSaved?.id_mascota) {
+      newPetRecord.id_mascota = dbSaved.id_mascota;
+      newPetRecord.id_propietario = dbSaved.id_propietario;
+    }
+
+    // Si activó el recordatorio de WhatsApp, confirmarlo vía endpoint de WhatsApp/BD
     if (enableWhatsAppReminder) {
       await scheduleWhatsAppReminder({
+        id_mascota: dbSaved?.id_mascota || null,
+        id_propietario: dbSaved?.id_propietario || currentUser?.id_propietario || null,
+        petCode: generatedCode,
         petName: newPetRecord.nombre,
         ownerName: ownerData.nombres || 'Propietario',
         ownerPhone: ownerData.telefono,

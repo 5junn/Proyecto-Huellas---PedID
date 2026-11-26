@@ -6,6 +6,17 @@ import Logo from '../components/Logo';
 import Icon from '../components/Icon';
 import { Spark, BarChart, Donut } from '../components/Charts';
 import { getRazasPorEspecie } from '../data/razasData';
+import { apiFetch } from '../services/apiClient';
+import {
+  fetchPredictiveAlertsAI,
+  generateClinicalSummaryAI,
+  generateSmartReminderAI,
+  sendAutoBatchMessages,
+  sendDirectMessageDB,
+  fetchRegisteredNumbersDB,
+  fetchRemindersDB,
+  fetchMessagingHistoryDB
+} from '../services/whatsappService';
 import {
   KPIS,
   WEEK,
@@ -19,7 +30,7 @@ import {
   USUARIOS_STAFF,
   RECORDATORIOS_CLINICA
 } from '../data/data';
-import '../styles/Dashboard.css';
+import '../styles/dashboard.css';
 import '../styles/staffDashboard.css';
 
 const MENU = [
@@ -58,7 +69,6 @@ const SECTIONS = {
 };
 
 const STATUS_TEXT = { done: 'Atendida', progress: 'En curso', waiting: 'En espera' };
-const STATUS_CLASS = { done: 'ok', progress: 'warn', waiting: 'danger' };
 
 const loadMergedMascotas = () => {
   try {
@@ -113,20 +123,44 @@ export default function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // Listas interactivas
+  // Listas interactivas sincronizadas con MySQL + respaldo local
   const [consultas, setConsultas] = useState(CONSULTS);
   const [mascotas, setMascotas] = useState(loadMergedMascotas);
   const [vacunas, setVacunas] = useState(VACCINES);
+  const [propietarios, setPropietarios] = useState(PROPIETARIOS_CLINICA);
+  const [recordatorios, setRecordatorios] = useState(RECORDATORIOS_CLINICA);
   const [personal, setPersonal] = useState(USUARIOS_STAFF);
+  const [registeredNumbers, setRegisteredNumbers] = useState([]);
+  const [messagingHistory, setMessagingHistory] = useState([]);
+  const [predictiveAlerts, setPredictiveAlerts] = useState(null);
+  const [loadingAI, setLoadingAI] = useState(false);
 
   // Estados de modales
   const [modalConsultaOpen, setModalConsultaOpen] = useState(false);
   const [modalVacunaOpen, setModalVacunaOpen] = useState(false);
   const [modalStaffOpen, setModalStaffOpen] = useState(false);
   const [modalPetOpen, setModalPetOpen] = useState(false);
+  const [modalSmartReminderOpen, setModalSmartReminderOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [modalAlertasOpen, setModalAlertasOpen] = useState(false);
   const [isEditingAgenda, setIsEditingAgenda] = useState(false);
+
+  // Estados para IA Clínica y Mensajería Automática
+  const [clinicalSummary, setClinicalSummary] = useState(null);
+  const [smartReminderForm, setSmartReminderForm] = useState({
+    petName: 'Toby',
+    canal: 'WhatsApp',
+    vaccineName: 'Refuerzo Vacunal',
+    dueDate: 'En 7 días',
+    asunto: '',
+    mensaje: '',
+    provider: ''
+  });
+  const [broadcastMessage, setBroadcastMessage] = useState(
+    '🐾 Hola {nombre}, te saludamos de Clínica Veterinaria Huellas. Recuerda revisar el carnet de vacunación y controles de {mascota} en Huellas PetID.'
+  );
+  const [broadcastChannel, setBroadcastChannel] = useState('WhatsApp');
+  const [sendingBatch, setSendingBatch] = useState(false);
 
   // Sincronización en tiempo real de alertas GPS de rescate
   const [gpsAlerts, setGpsAlerts] = useState(() => {
@@ -137,8 +171,72 @@ export default function Dashboard() {
     }
   });
 
-  const handleResolveGpsAlert = (alertId) => {
-    const updated = gpsAlerts.filter((a) => a.id !== alertId);
+  const loadAllFromBackend = React.useCallback(async () => {
+    try {
+      const [
+        dbMascotas,
+        dbConsultas,
+        dbVacunas,
+        dbPropietarios,
+        dbRecordatorios,
+        dbStaff,
+        dbGps,
+        dbNumbers,
+        dbHistory,
+        dbPredict
+      ] = await Promise.allSettled([
+        apiFetch('/mascotas'),
+        apiFetch('/clinica/consultas'),
+        apiFetch('/clinica/vacunas'),
+        apiFetch('/auth/propietarios'),
+        fetchRemindersDB(),
+        apiFetch('/auth/staff'),
+        apiFetch('/mascotas/alertas-gps'),
+        fetchRegisteredNumbersDB(),
+        fetchMessagingHistoryDB(),
+        fetchPredictiveAlertsAI()
+      ]);
+
+      if (dbMascotas.status === 'fulfilled' && Array.isArray(dbMascotas.value) && dbMascotas.value.length > 0) {
+        setMascotas(dbMascotas.value);
+      }
+      if (dbConsultas.status === 'fulfilled' && Array.isArray(dbConsultas.value) && dbConsultas.value.length > 0) {
+        setConsultas(dbConsultas.value);
+      }
+      if (dbVacunas.status === 'fulfilled' && Array.isArray(dbVacunas.value) && dbVacunas.value.length > 0) {
+        setVacunas(dbVacunas.value);
+      }
+      if (dbPropietarios.status === 'fulfilled' && Array.isArray(dbPropietarios.value) && dbPropietarios.value.length > 0) {
+        setPropietarios(dbPropietarios.value);
+      }
+      if (dbRecordatorios.status === 'fulfilled' && Array.isArray(dbRecordatorios.value) && dbRecordatorios.value.length > 0) {
+        setRecordatorios(dbRecordatorios.value);
+      }
+      if (dbStaff.status === 'fulfilled' && Array.isArray(dbStaff.value) && dbStaff.value.length > 0) {
+        setPersonal(dbStaff.value);
+      }
+      if (dbGps.status === 'fulfilled' && Array.isArray(dbGps.value) && dbGps.value.length > 0) {
+        setGpsAlerts(dbGps.value);
+      }
+      if (dbNumbers.status === 'fulfilled' && Array.isArray(dbNumbers.value?.numeros)) {
+        setRegisteredNumbers(dbNumbers.value.numeros);
+      }
+      if (dbHistory.status === 'fulfilled' && Array.isArray(dbHistory.value)) {
+        setMessagingHistory(dbHistory.value);
+      }
+      if (dbPredict.status === 'fulfilled' && dbPredict.value?.indicadores_preventivos) {
+        setPredictiveAlerts(dbPredict.value);
+      }
+    } catch {
+      // Respaldo silencioso cuando backend está offline
+    }
+  }, []);
+
+  const handleResolveGpsAlert = async (alertId) => {
+    if (typeof alertId === 'number') {
+      apiFetch(`/mascotas/alertas-gps/${alertId}/resolver`, { method: 'PATCH' }).catch(() => {});
+    }
+    const updated = gpsAlerts.filter((a) => a.id !== alertId && a.id_alerta !== alertId);
     setGpsAlerts(updated);
     try {
       localStorage.setItem('huellas_alertas_gps', JSON.stringify(updated));
@@ -149,16 +247,19 @@ export default function Dashboard() {
     showToast('Alerta de rescate GPS archivada y marcada como atendida');
   };
 
-  // Sincronización en tiempo real de pacientes y mascotas registradas
+  // Sincronización en tiempo real con MySQL y eventos de almacenamiento local
   React.useEffect(() => {
+    loadAllFromBackend();
+
     const handleSync = () => {
       setMascotas(loadMergedMascotas());
       try {
         const storedGps = JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
-        setGpsAlerts(storedGps);
+        if (storedGps.length > 0) setGpsAlerts(storedGps);
       } catch (err) {
         console.error(err);
       }
+      loadAllFromBackend();
     };
     window.addEventListener('storage', handleSync);
     window.addEventListener('huellas_mascotas_updated', handleSync);
@@ -168,7 +269,7 @@ export default function Dashboard() {
       window.removeEventListener('huellas_mascotas_updated', handleSync);
       window.removeEventListener('huellas_alerta_gps_recibida', handleSync);
     };
-  }, []);
+  }, [loadAllFromBackend]);
 
   // Formulario de nueva mascota en recepción
   const [formPet, setFormPet] = useState({
@@ -176,7 +277,8 @@ export default function Dashboard() {
     especie: 'Canino',
     raza: 'Beagle',
     propietario: '',
-    telefono: '987 654 321',
+    telefono: '987654321',
+    correo: '',
     sexo: 'Macho',
     edad: '1 año',
     peso: '12',
@@ -189,7 +291,10 @@ export default function Dashboard() {
     breed: '',
     owner: '',
     reason: '',
+    peso: '',
+    temperatura: '',
     diagnostico: '',
+    tratamiento_receta: '',
     vet: currentUser.nombres,
     time: 'Ahora'
   });
@@ -199,7 +304,7 @@ export default function Dashboard() {
     owner: '',
     vaccine: 'Antirrábica Rabisin',
     lote: 'LT-9941',
-    expire: 'En 1 año',
+    dias_refuerzo: '365',
     vet: currentUser.nombres
   });
 
@@ -244,30 +349,119 @@ export default function Dashboard() {
 
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 4000);
+    setTimeout(() => setToastMessage(''), 4500);
   };
 
-  const handleCreateConsulta = (e) => {
+  // IA 2: Generar resumen del historial clínico y borrador editable de diagnóstico
+  const handleGenerateClinicalDraft = async () => {
+    if (!formConsulta.pet.trim()) {
+      showToast('Escribe o selecciona primero el nombre del paciente.');
+      return;
+    }
+    setLoadingAI(true);
+    try {
+      const matchedPet = mascotas.find(
+        (m) => m.nombre.toLowerCase() === formConsulta.pet.trim().toLowerCase()
+      );
+      const res = await generateClinicalSummaryAI({
+        id_mascota: matchedPet?.id_mascota || null,
+        codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
+        petName: formConsulta.pet,
+        especie: matchedPet?.especie || 'Canino',
+        breed: formConsulta.breed || matchedPet?.raza || 'Mestizo',
+        alergias: matchedPet?.alergias || '',
+        motivo_consulta: formConsulta.reason,
+      });
+      setClinicalSummary(res);
+      setFormConsulta((prev) => ({
+        ...prev,
+        breed: prev.breed || matchedPet?.raza || '',
+        owner: prev.owner || matchedPet?.propietario || '',
+        diagnostico: res.borrador_diagnostico || prev.diagnostico,
+        tratamiento_receta: res.indicaciones_sugeridas || prev.tratamiento_receta,
+      }));
+      showToast(`Borrador clínico generado con ${res.provider}`);
+    } catch (err) {
+      showToast(`Error generando resumen IA: ${err.message}`);
+    } finally {
+      setLoadingAI(false);
+    }
+  };
+
+  const handleCreateConsulta = async (e) => {
     e.preventDefault();
     if (!formConsulta.pet || !formConsulta.reason) return;
-    const nueva = {
+
+    const matchedPet = mascotas.find(
+      (m) => m.nombre.toLowerCase() === formConsulta.pet.trim().toLowerCase()
+    );
+
+    let savedRecord = null;
+    try {
+      savedRecord = await apiFetch('/clinica/consultas', {
+        method: 'POST',
+        body: JSON.stringify({
+          id_mascota: matchedPet?.id_mascota || null,
+          codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
+          pet: formConsulta.pet,
+          reason: formConsulta.reason,
+          peso: formConsulta.peso || null,
+          temperatura: formConsulta.temperatura || null,
+          diagnostico: formConsulta.diagnostico || 'Atención en curso en consultorio.',
+          tratamiento_receta: formConsulta.tratamiento_receta || '',
+          borrador_ia: clinicalSummary?.borrador_diagnostico || '',
+          vet: currentUser.nombres,
+          status: 'progress'
+        })
+      });
+    } catch {
+      // Fallback local si backend offline o mascota solo local
+    }
+
+    const nueva = savedRecord || {
       id: 'C-' + Math.floor(10 + Math.random() * 90),
       pet: formConsulta.pet,
-      breed: formConsulta.breed || 'Mestizo',
-      owner: formConsulta.owner || 'Propietario',
+      breed: formConsulta.breed || matchedPet?.raza || 'Mestizo',
+      owner: formConsulta.owner || matchedPet?.propietario || 'Propietario',
       reason: formConsulta.reason,
       vet: currentUser.nombres,
-      time: '12:45',
+      time: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
       status: 'progress',
       diagnostico: formConsulta.diagnostico || 'Atención en curso en consultorio.'
     };
     setConsultas([nueva, ...consultas]);
     setModalConsultaOpen(false);
-    setFormConsulta({ pet: '', breed: '', owner: '', reason: '', diagnostico: '', vet: currentUser.nombres, time: 'Ahora' });
-    showToast(`Consulta registrada exitosamente para ${nueva.pet}`);
+    setClinicalSummary(null);
+    setFormConsulta({
+      pet: '',
+      breed: '',
+      owner: '',
+      reason: '',
+      peso: '',
+      temperatura: '',
+      diagnostico: '',
+      tratamiento_receta: '',
+      vet: currentUser.nombres,
+      time: 'Ahora'
+    });
+    showToast(
+      savedRecord
+        ? `Consulta guardada en MySQL para ${nueva.pet}`
+        : `Consulta registrada para ${nueva.pet}`
+    );
+    loadAllFromBackend();
   };
 
-  const handleChangeConsultaStatus = (id, newStatus) => {
+  const handleChangeConsultaStatus = async (id, newStatus) => {
+    try {
+      await apiFetch(`/clinica/consultas/${encodeURIComponent(id)}/estado`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus })
+      });
+    } catch {
+      // Fallback local
+    }
+
     setConsultas((prev) =>
       prev.map((c) => {
         if ((c.id && c.id === id) || c.pet === id) {
@@ -276,29 +470,58 @@ export default function Dashboard() {
         return c;
       })
     );
-    showToast(`Estado actualizado: "${STATUS_TEXT[newStatus] || newStatus}" para la cita`);
+    showToast(`Estado actualizado: "${STATUS_TEXT[newStatus] || newStatus}"`);
   };
 
-  const handleCreateVacuna = (e) => {
+  const handleCreateVacuna = async (e) => {
     e.preventDefault();
     if (!formVacuna.pet) return;
-    const nueva = {
+
+    const matchedPet = mascotas.find(
+      (m) => m.nombre.toLowerCase() === formVacuna.pet.trim().toLowerCase()
+    );
+
+    let savedVax = null;
+    try {
+      savedVax = await apiFetch('/clinica/vacunas', {
+        method: 'POST',
+        body: JSON.stringify({
+          id_mascota: matchedPet?.id_mascota || null,
+          codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
+          pet: formVacuna.pet,
+          vaccine: formVacuna.vaccine,
+          lote: formVacuna.lote,
+          dias_refuerzo: Number(formVacuna.dias_refuerzo) || 365,
+          vet: currentUser.nombres,
+          canal_recordatorio: 'WhatsApp'
+        })
+      });
+    } catch {
+      // Fallback local
+    }
+
+    const nueva = savedVax || {
       id: 'V-' + Math.floor(100 + Math.random() * 900),
       pet: formVacuna.pet,
-      owner: formVacuna.owner || 'Propietario',
+      owner: formVacuna.owner || matchedPet?.propietario || 'Propietario',
       vaccine: formVacuna.vaccine,
       lote: formVacuna.lote,
       applied: 'Hoy',
-      expire: 'En 1 año',
+      expire: `En ${formVacuna.dias_refuerzo || 365} días`,
       status: 'al-dia',
       vet: currentUser.nombres
     };
     setVacunas([nueva, ...vacunas]);
     setModalVacunaOpen(false);
-    showToast(`Dosis de ${nueva.vaccine} aplicada a ${nueva.pet}`);
+    showToast(
+      savedVax
+        ? `Dosis de ${nueva.vaccine} guardada en MySQL y recordatorio inteligente programado para ${nueva.pet}`
+        : `Dosis de ${nueva.vaccine} aplicada a ${nueva.pet}`
+    );
+    loadAllFromBackend();
   };
 
-  const handleCreatePetReception = (e) => {
+  const handleCreatePetReception = async (e) => {
     e.preventDefault();
     if (!formPet.nombre.trim()) return;
 
@@ -312,7 +535,8 @@ export default function Dashboard() {
       edad: formPet.edad || '1 año',
       peso: formPet.peso ? `${formPet.peso} kg` : '10 kg',
       propietario: formPet.propietario || 'Propietario Huellas',
-      telefono: formPet.telefono || '987 654 321',
+      telefono: formPet.telefono || '987654321',
+      correo: formPet.correo || '',
       codigoQR: newCode,
       estadoExtravio: false,
       foto: formPet.especie === 'Felino'
@@ -331,6 +555,35 @@ export default function Dashboard() {
     };
 
     try {
+      const dbRes = await apiFetch('/mascotas', {
+        method: 'POST',
+        body: JSON.stringify({
+          codigo_qr: newCode,
+          nombre: formPet.nombre,
+          especie: formPet.especie,
+          raza: formPet.raza || 'Mestizo',
+          sexo: formPet.sexo,
+          edad: formPet.edad || '1 año',
+          peso_actual: formPet.peso || null,
+          foto_url: newPetRecord.foto,
+          alergias: newPetRecord.alergias,
+          propietario_nombre: formPet.propietario || 'Propietario Huellas',
+          propietario_telefono: formPet.telefono || '987654321',
+          propietario_correo: formPet.correo || '',
+          vacuna_inicial: 'Control Inicial Clínico',
+          reminderDays: 30,
+          programar_recordatorio: true
+        })
+      });
+      if (dbRes?.id_mascota) {
+        newPetRecord.id_mascota = dbRes.id_mascota;
+        newPetRecord.id_propietario = dbRes.id_propietario;
+      }
+    } catch {
+      // Fallback local
+    }
+
+    try {
       const stored = localStorage.getItem('huellas_mascotas');
       const list = stored ? JSON.parse(stored) : [];
       list.unshift(newPetRecord);
@@ -340,26 +593,39 @@ export default function Dashboard() {
       console.error(err);
     }
 
-    setMascotas(loadMergedMascotas());
+    setMascotas((prev) => [newPetRecord, ...prev]);
     setModalPetOpen(false);
     setFormPet({
       nombre: '',
       especie: 'Canino',
       raza: 'Beagle',
       propietario: '',
-      telefono: '987 654 321',
+      telefono: '987654321',
+      correo: '',
       sexo: 'Macho',
       edad: '1 año',
       peso: '12',
       alergias: ''
     });
-    showToast(`¡Paciente ${newPetRecord.nombre} registrado con placa QR ${newCode}! Sincronizado para el propietario y recepción.`);
+    showToast(`¡Paciente ${newPetRecord.nombre} guardado en MySQL con placa QR ${newCode}!`);
+    loadAllFromBackend();
   };
 
-  const handleCreateStaff = (e) => {
+  const handleCreateStaff = async (e) => {
     e.preventDefault();
     if (!formStaff.nombres || !formStaff.correo) return;
-    const nuevo = {
+
+    let savedStaff = null;
+    try {
+      savedStaff = await apiFetch('/auth/staff', {
+        method: 'POST',
+        body: JSON.stringify(formStaff)
+      });
+    } catch (err) {
+      showToast(err.message);
+    }
+
+    const nuevo = savedStaff || {
       id: 'U-' + Math.floor(10 + Math.random() * 90),
       nombres: formStaff.nombres,
       correo: formStaff.correo,
@@ -370,7 +636,100 @@ export default function Dashboard() {
     };
     setPersonal([...personal, nuevo]);
     setModalStaffOpen(false);
-    showToast(`Cuenta institucional creada para ${nuevo.nombres}`);
+    showToast(`Cuenta institucional creada en BD para ${nuevo.nombres}`);
+  };
+
+  // IA 1 & Mensajería Automática
+  const handleGenerateSmartReminderDraft = async () => {
+    setLoadingAI(true);
+    try {
+      const matchedPet = mascotas.find(
+        (m) => m.nombre.toLowerCase() === smartReminderForm.petName.trim().toLowerCase()
+      );
+      const res = await generateSmartReminderAI({
+        id_mascota: matchedPet?.id_mascota || null,
+        codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
+        petName: smartReminderForm.petName,
+        ownerName: matchedPet?.propietario || 'Propietario',
+        vaccineName: smartReminderForm.vaccineName,
+        dueDate: smartReminderForm.dueDate,
+        canal: smartReminderForm.canal
+      });
+      setSmartReminderForm((prev) => ({
+        ...prev,
+        asunto: res.asunto || prev.asunto,
+        mensaje: res.mensaje || prev.mensaje,
+        provider: res.provider || ''
+      }));
+    } catch (err) {
+      showToast(err.message);
+    } finally {
+      setLoadingAI(false);
+    }
+  };
+
+  const handleSendSmartReminder = async (e, sendImmediately = true) => {
+    e.preventDefault();
+    const matchedPet = mascotas.find(
+      (m) => m.nombre.toLowerCase() === smartReminderForm.petName.trim().toLowerCase()
+    );
+    try {
+      await sendDirectMessageDB({
+        id_mascota: matchedPet?.id_mascota || null,
+        id_propietario: matchedPet?.id_propietario || null,
+        canal: smartReminderForm.canal,
+        asunto: smartReminderForm.asunto || `Recordatorio ${smartReminderForm.vaccineName}`,
+        mensaje: smartReminderForm.mensaje,
+        telefono: matchedPet?.telefono || matchedPet?.propietario_telefono || '987654321',
+        correo: matchedPet?.correo || matchedPet?.propietario_correo || '',
+        generado_por_ia: true,
+        soloProgramar: !sendImmediately
+      });
+      setModalSmartReminderOpen(false);
+      showToast(
+        sendImmediately
+          ? `Mensaje inteligente enviado a ${matchedPet?.propietario || 'propietario'} y registrado en BD`
+          : `Recordatorio inteligente programado en la tabla Recordatorios`
+      );
+      loadAllFromBackend();
+    } catch (err) {
+      showToast(err.message);
+    }
+  };
+
+  const handleRunAutoBatch = async (modo = 'recordatorios') => {
+    setSendingBatch(true);
+    try {
+      const res = await sendAutoBatchMessages({
+        modo,
+        canal: broadcastChannel,
+        mensaje: broadcastMessage,
+        diasAnticipacion: 15,
+        soloVencidos: false
+      });
+      showToast(
+        modo === 'todos_numeros'
+          ? `Envío masivo completado: ${res.enviados}/${res.total_destinatarios} números notificados en la BD`
+          : `Envío automático ejecutado: ${res.generadosPorVacunas} generados, ${res.enviados} enviados`
+      );
+      loadAllFromBackend();
+    } catch (err) {
+      showToast(`No se pudo ejecutar envío automático: ${err.message}`);
+    } finally {
+      setSendingBatch(false);
+    }
+  };
+
+  const handleResendReminder = async (rec) => {
+    try {
+      if (rec.id_recordatorio) {
+        await sendDirectMessageDB({ id_recordatorio: rec.id_recordatorio });
+        loadAllFromBackend();
+      }
+      showToast(`Notificación enviada a ${rec.owner} (${rec.telefono || rec.canal})`);
+    } catch (err) {
+      showToast(err.message);
+    }
   };
 
   const salir = () => {

@@ -8,7 +8,7 @@ import Logo from '../components/Logo';
 import CollarQRTag from '../components/CollarQRTag';
 import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
 import { getUser } from '../services/authService';
-import { scheduleWhatsAppReminder } from '../services/whatsappService';
+import { apiFetch } from '../services/apiClient';
 import { getRazasPorEspecie } from '../data/razasData';
 import { getVacunaSugerida } from '../data/vacunasData';
 import '../styles/owner.css';
@@ -100,7 +100,7 @@ function filterPetsForUser(allPets, currentUser) {
 }
 
 export default function OwnerDashboard() {
-  const user = getUser() || { nombres: 'Lucía Paredes', correo: 'propietario@gmail.com', rol: 'Propietario', telefono: '987 654 321' };
+  const [user] = useState(() => getUser() || { nombres: 'Lucía Paredes', correo: 'propietario@gmail.com', rol: 'Propietario', telefono: '976543210' });
 
   // Cargar únicamente las mascotas pertenecientes a este perfil/cuenta
   const [mascotas, setMascotas] = useState(() => filterPetsForUser(getAllPetsFromStorage(), user));
@@ -124,11 +124,9 @@ export default function OwnerDashboard() {
   const [selectedQRPet, setSelectedQRPet] = useState(null);
   const [qrModalStage, setQrModalStage] = useState('collar'); // 'collar' | 'habitual'
 
-  // Estados para Recordatorios por WhatsApp (API Externa)
+  // Estados para Recordatorios por WhatsApp (API Externa + IA)
   const [modalWhatsAppOpen, setModalWhatsAppOpen] = useState(false);
   const [whatsAppTarget, setWhatsAppTarget] = useState({ pet: null, vaccine: null });
-  const [whatsAppStatus, setWhatsAppStatus] = useState(null);
-  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
 
   // Formulario nueva mascota
   const [newPet, setNewPet] = useState({
@@ -154,8 +152,31 @@ export default function OwnerDashboard() {
     reader.readAsDataURL(file);
   };
 
-  // Sincronización en tiempo real con cambios hechos por recepción o registro exterior
+  // Sincronización en tiempo real con MySQL y almacenamiento local
   useEffect(() => {
+    let active = true;
+
+    const loadFromBackend = async () => {
+      try {
+        const qs = user?.correo ? `?correo=${encodeURIComponent(user.correo)}` : '';
+        const dbPets = await apiFetch(`/mascotas${qs}`);
+        if (active && Array.isArray(dbPets) && dbPets.length > 0) {
+          setMascotas(dbPets);
+        }
+      } catch {
+        // Backend offline: mantener caché local
+      }
+      try {
+        const dbGps = await apiFetch('/mascotas/alertas-gps');
+        if (active && Array.isArray(dbGps) && dbGps.length > 0) {
+          setGpsAlerts(dbGps);
+        }
+      } catch {
+        // Ignorar si backend offline
+      }
+    };
+    loadFromBackend();
+
     const syncFromStorage = () => {
       setMascotas(filterPetsForUser(getAllPetsFromStorage(), user));
     };
@@ -163,7 +184,6 @@ export default function OwnerDashboard() {
     window.addEventListener('storage', syncFromStorage);
     window.addEventListener('huellas_mascotas_updated', syncFromStorage);
 
-    // Escuchar alertas GPS en tiempo real
     const syncGpsAlerts = () => {
       try {
         const stored = JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
@@ -176,15 +196,19 @@ export default function OwnerDashboard() {
     window.addEventListener('storage', syncGpsAlerts);
 
     return () => {
+      active = false;
       window.removeEventListener('storage', syncFromStorage);
       window.removeEventListener('huellas_mascotas_updated', syncFromStorage);
       window.removeEventListener('huellas_alerta_gps_recibida', syncGpsAlerts);
       window.removeEventListener('storage', syncGpsAlerts);
     };
-  }, []);
+  }, [user]);
 
-  const handleResolveGpsAlert = (alertId) => {
-    const updated = gpsAlerts.filter((a) => a.id !== alertId);
+  const handleResolveGpsAlert = async (alertId) => {
+    if (typeof alertId === 'number') {
+      apiFetch(`/mascotas/alertas-gps/${alertId}/resolver`, { method: 'PATCH' }).catch(() => {});
+    }
+    const updated = gpsAlerts.filter((a) => a.id !== alertId && a.id_alerta !== alertId);
     setGpsAlerts(updated);
     try {
       localStorage.setItem('huellas_alertas_gps', JSON.stringify(updated));
@@ -196,15 +220,26 @@ export default function OwnerDashboard() {
     setTimeout(() => setAlertSuccess(''), 4500);
   };
 
-  const toggleModoExtravio = (petId) => {
-    const allStored = getAllPetsFromStorage();
-    let nuevoEstado = false;
-    let nombreMascota = '';
+  const toggleModoExtravio = async (petId) => {
+    const targetPet = mascotas.find((p) => p.id === petId || p.codigoQR === petId || p.id_mascota === petId);
+    let nuevoEstado = targetPet ? !targetPet.estadoExtravio : true;
+    const nombreMascota = targetPet?.nombre || '';
 
+    try {
+      const apiRes = await apiFetch(`/mascotas/${encodeURIComponent(targetPet?.codigoQR || petId)}/extravio`, {
+        method: 'PATCH',
+        body: JSON.stringify({ estadoExtravio: nuevoEstado })
+      });
+      if (typeof apiRes?.estadoExtravio === 'boolean') {
+        nuevoEstado = apiRes.estadoExtravio;
+      }
+    } catch {
+      // Continuar con estado local
+    }
+
+    const allStored = getAllPetsFromStorage();
     const updatedGlobal = allStored.map((p) => {
       if (p.id === petId || p.codigoQR === petId) {
-        nuevoEstado = !p.estadoExtravio;
-        nombreMascota = p.nombre;
         return { ...p, estadoExtravio: nuevoEstado };
       }
       return p;
@@ -218,10 +253,14 @@ export default function OwnerDashboard() {
       console.error(e);
     }
 
-    setMascotas(filterPetsForUser(updatedGlobal, user));
+    setMascotas((prev) =>
+      prev.map((p) =>
+        p.id === petId || p.codigoQR === petId ? { ...p, estadoExtravio: nuevoEstado } : p
+      )
+    );
 
     const msg = nuevoEstado
-      ? `¡ALERTA ACTIVADA! ${nombreMascota} está ahora en Modo Mascota Perdida. Cualquier escaneo QR mostrará datos de emergencia.`
+      ? `¡ALERTA ACTIVADA! ${nombreMascota} está ahora en Modo Mascota Perdida. Se notificó por WhatsApp y cualquier escaneo QR mostrará rescate.`
       : `Modo Extravío desactivado para ${nombreMascota}. Todo seguro en Modo Habitual/Control.`;
     setAlertSuccess(msg);
     setTimeout(() => setAlertSuccess(''), 5000);
@@ -238,47 +277,17 @@ export default function OwnerDashboard() {
       pet,
       vaccine: vaccine || { nombre: 'Vacunación General / Refuerzo', proxima: 'En 30 días' }
     });
-    setWhatsAppStatus(null);
     setModalWhatsAppOpen(true);
   };
 
-  const handleConfirmWhatsAppReminder = async () => {
-    if (!whatsAppTarget.pet) return;
-    setSendingWhatsApp(true);
-    setWhatsAppStatus(null);
-
-    try {
-      const res = await scheduleWhatsAppReminder({
-        petName: whatsAppTarget.pet.nombre,
-        ownerName: user.nombres,
-        ownerPhone: user.telefono || '987 654 321',
-        reminderType: 'vacuna',
-        vaccineName: whatsAppTarget.vaccine?.nombre || 'Vacuna de Refuerzo',
-        dueDate: whatsAppTarget.vaccine?.proxima || 'En 30 días'
-      });
-
-      setWhatsAppStatus({
-        ok: true,
-        message: '¡Recordatorio programado con éxito mediante la API externa de WhatsApp!',
-        payload: res.data,
-        directLink: res.directLink
-      });
-    } catch {
-      setWhatsAppStatus({
-        ok: false,
-        message: 'No se pudo conectar a la API externa de WhatsApp.'
-      });
-    } finally {
-      setSendingWhatsApp(false);
-    }
-  };
-
-  const handleCreatePet = (e) => {
+  const handleCreatePet = async (e) => {
     e.preventDefault();
     if (!newPet.nombre.trim()) return;
 
+    const generatedQR = 'HP-' + Math.floor(1000 + Math.random() * 9000);
+    const suggestedVax = getVacunaSugerida(newPet.especie);
     const nueva = {
-      id: 'hp-' + Math.floor(1000 + Math.random() * 9000),
+      id: generatedQR.toLowerCase(),
       nombre: newPet.nombre,
       especie: newPet.especie,
       raza: newPet.raza || 'Beagle',
@@ -286,17 +295,17 @@ export default function OwnerDashboard() {
       sexo: newPet.sexo,
       peso: newPet.peso ? `${newPet.peso} kg` : 'N/A',
       color: newPet.color || 'Varios',
-      codigoQR: 'HP-' + Math.floor(1000 + Math.random() * 9000),
+      codigoQR: generatedQR,
       estadoExtravio: false,
       propietario: user.nombres || 'Lucía Paredes',
       correo: user.correo || 'propietario@gmail.com',
-      telefono: user.telefono || '987 654 321',
+      telefono: user.telefono || '976543210',
       foto: newPet.foto || (newPet.especie === 'Gato'
         ? 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80'
         : 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80'),
       vacunas: [
         {
-          nombre: getVacunaSugerida(newPet.especie),
+          nombre: suggestedVax,
           fecha: 'Hoy',
           proxima: 'En 30 días',
           estado: 'ok',
@@ -308,6 +317,36 @@ export default function OwnerDashboard() {
       alergias: 'Por evaluar en consulta médica.',
     };
 
+    try {
+      const dbRes = await apiFetch('/mascotas', {
+        method: 'POST',
+        body: JSON.stringify({
+          id_propietario: user.id_propietario || null,
+          codigo_qr: generatedQR,
+          nombre: nueva.nombre,
+          especie: nueva.especie,
+          raza: nueva.raza,
+          sexo: nueva.sexo,
+          edad: nueva.edad,
+          peso_actual: newPet.peso || null,
+          foto_url: nueva.foto,
+          alergias: nueva.alergias,
+          propietario_nombre: nueva.propietario,
+          propietario_telefono: nueva.telefono,
+          propietario_correo: nueva.correo,
+          vacuna_inicial: suggestedVax,
+          reminderDays: 30,
+          programar_recordatorio: true
+        })
+      });
+      if (dbRes?.id_mascota) {
+        nueva.id_mascota = dbRes.id_mascota;
+        nueva.id_propietario = dbRes.id_propietario;
+      }
+    } catch {
+      // Caché local si backend offline
+    }
+
     const allStored = getAllPetsFromStorage();
     const updatedGlobal = [nueva, ...allStored];
     try {
@@ -317,10 +356,10 @@ export default function OwnerDashboard() {
     } catch {
       // Ignorar error
     }
-    setMascotas(filterPetsForUser(updatedGlobal, user));
+    setMascotas((prev) => [nueva, ...prev]);
     setModalNewPetOpen(false);
     setNewPet({ nombre: '', especie: 'Perro', raza: 'Beagle', edad: '', sexo: 'Macho', peso: '', color: '' });
-    setAlertSuccess(`¡${nueva.nombre} ha sido registrada con éxito y sincronizada con el perfil de recepción!`);
+    setAlertSuccess(`¡${nueva.nombre} ha sido registrada en la base de datos y sincronizada con recepción!`);
     setTimeout(() => setAlertSuccess(''), 4500);
   };
 
@@ -1140,8 +1179,12 @@ export default function OwnerDashboard() {
       <WhatsAppChatbotModal
         isOpen={modalWhatsAppOpen}
         onClose={() => setModalWhatsAppOpen(false)}
+        idMascota={whatsAppTarget.pet?.id_mascota || null}
+        idPropietario={whatsAppTarget.pet?.id_propietario || user.id_propietario || null}
         petName={whatsAppTarget.pet?.nombre || 'tu mascota'}
         ownerName={user.nombres || 'Propietario'}
+        ownerPhone={user.telefono || whatsAppTarget.pet?.telefono || '976543210'}
+        petAllergies={whatsAppTarget.pet?.alergias || ''}
         vaccineName={whatsAppTarget.vaccine?.nombre || 'Vacuna de Refuerzo'}
         dueDate={whatsAppTarget.vaccine?.proxima || 'En 30 días'}
         petCode={whatsAppTarget.pet?.codigoQR || 'HP-4092'}

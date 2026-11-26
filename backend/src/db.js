@@ -1,20 +1,63 @@
 const mysql = require('mysql2');
 require('dotenv').config();
 
-const connection = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'huellas_petid',
+  port: Number(process.env.DB_PORT) || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  charset: 'utf8mb4',
 });
 
-connection.connect((err) => {
-  if (err) {
-    console.error('Error al conectar a la base de datos MySQL:', err.message);
-    return;
+const promisePool = pool.promise();
+
+/**
+ * Ejecuta una consulta SQL parametrizada retornando una promesa con [rows, fields].
+ */
+function queryAsync(sql, params = []) {
+  return promisePool.query(sql, params);
+}
+
+/**
+ * Ejecuta un callback dentro de una transacción MySQL.
+ */
+async function withTransaction(fn) {
+  const conn = await promisePool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const result = await fn(conn);
+    await conn.commit();
+    return result;
+  } catch (err) {
+    await conn.rollback();
+    throw err;
+  } finally {
+    conn.release();
   }
-  console.log('¡Conectado exitosamente a la base de datos MySQL (huellas_petid)!');
-});
+}
 
-module.exports = connection;
+/**
+ * Verifica conectividad al servidor MySQL.
+ */
+async function checkConnection() {
+  try {
+    await promisePool.query('SELECT 1');
+    return true;
+  } catch (err) {
+    console.warn('MySQL no disponible:', err.message);
+    return false;
+  }
+}
+
+module.exports = {
+  query: (...args) => pool.query(...args),
+  promise: () => promisePool,
+  queryAsync,
+  withTransaction,
+  checkConnection,
+  end: () => promisePool.end(),
+};

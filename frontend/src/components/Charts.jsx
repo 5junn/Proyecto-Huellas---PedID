@@ -20,7 +20,7 @@ export function Spark({ data }) {
 
 export function BarChart({ labels, data }) {
   const maxVal = Math.max(...data);
-  const top = Math.ceil(maxVal / 10) * 10;
+  const top = Math.ceil(maxVal / 10) * 10 || 10;
   const ticks = [1, 0.75, 0.5, 0.25, 0].map((t) => Math.round(top * t));
   return (
     <div className="bars" role="img" aria-label="Gráfico de barras de consultas atendidas">
@@ -43,20 +43,30 @@ export function BarChart({ labels, data }) {
 
 export function Donut({ parts, total, label }) {
   const R = 15.9155;
-  let acc = 25; // empieza en la parte superior
+  const segments = parts.reduce((acc, part) => {
+    const offset = acc.length === 0 ? 25 : acc[acc.length - 1].nextOffset;
+    acc.push({ ...part, offset, nextOffset: offset - part.value });
+    return acc;
+  }, []);
+
   return (
     <div className="donut">
       <svg viewBox="0 0 42 42" role="img" aria-label="Distribución de pacientes por especie">
         <circle cx="21" cy="21" r={R} fill="none" style={{ stroke: 'var(--line)' }} strokeWidth="5" />
-        {parts.map((p) => {
-          const el = (
-            <circle key={p.name} className="donut-seg" cx="21" cy="21" r={R} fill="none"
-              style={{ stroke: p.color }} strokeWidth="5"
-              strokeDasharray={`${p.value - 1.5} ${100 - p.value + 1.5}`} strokeDashoffset={acc} />
-          );
-          acc -= p.value;
-          return el;
-        })}
+        {segments.map((p) => (
+          <circle
+            key={p.name}
+            className="donut-seg"
+            cx="21"
+            cy="21"
+            r={R}
+            fill="none"
+            style={{ stroke: p.color }}
+            strokeWidth="5"
+            strokeDasharray={`${Math.max(0.5, p.value - 1.5)} ${100 - Math.max(0.5, p.value - 1.5)}`}
+            strokeDashoffset={p.offset}
+          />
+        ))}
       </svg>
       <div className="donut-center"><strong>{total}</strong><span>{label}</span></div>
     </div>

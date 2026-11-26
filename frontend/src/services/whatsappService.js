@@ -1,36 +1,23 @@
 // src/services/whatsappService.js
+import { apiFetch, getApiBase } from './apiClient';
 
-/**
- * Servicio de mensajería y recordatorios mediante la API de WhatsApp
- * Soporta enlace directo a la API de WhatsApp (Click to Chat) y simulación/llamada a webhook externo (Meta WhatsApp Cloud API).
- */
+const API_BASE = getApiBase();
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
-
-/**
- * Limpia y normaliza el número de teléfono con código de país (Perú +51 por defecto si tiene 9 dígitos)
- */
 export function formatWhatsAppPhone(phone) {
   if (!phone) return '51987654321';
-  const cleaned = phone.replace(/[^0-9]/g, '');
+  const cleaned = String(phone).replace(/[^0-9]/g, '');
   if (cleaned.length === 9) {
     return `51${cleaned}`;
   }
   return cleaned || '51987654321';
 }
 
-/**
- * Genera el enlace oficial a la API de WhatsApp
- */
 export function generateWhatsAppLink(phone, message) {
   const cleanPhone = formatWhatsAppPhone(phone);
-  const encodedText = encodeURIComponent(message.trim());
+  const encodedText = encodeURIComponent(String(message || '').trim());
   return `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
 }
 
-/**
- * Genera el texto estándar de recordatorio de vacunación para WhatsApp
- */
 export function getVaccineReminderMessage({
   petName = 'tu mascota',
   ownerName = 'Familia',
@@ -49,9 +36,6 @@ export function getVaccineReminderMessage({
     `¡Cuidamos a los que más quieres! 🐶🐱`;
 }
 
-/**
- * Genera el texto estándar de recordatorio de desparasitación o control
- */
 export function getGeneralReminderMessage({
   petName = 'tu mascota',
   ownerName = 'Familia',
@@ -67,62 +51,71 @@ export function getGeneralReminderMessage({
     `🏥 *${clinicName}* · Siempre contigo`;
 }
 
-/**
- * Envía / Programa el recordatorio a través de la API externa (o simula la integración con Meta / Twilio WhatsApp API)
- */
 export async function scheduleWhatsAppReminder({
+  id_mascota = null,
+  id_propietario = null,
+  petCode = null,
   petName,
   ownerName,
   ownerPhone,
-  reminderType = 'vacuna', // 'vacuna' | 'desparasitacion' | 'control'
+  reminderType = 'vacuna',
   vaccineName = 'Vacuna Antirrábica',
-  dueDate = 'En 30 días'
+  dueDate = 'En 30 días',
+  customMessage = null,
+  generadoPorIA = false
 }) {
-  const message = reminderType === 'vacuna'
-    ? getVaccineReminderMessage({ petName, ownerName, vaccineName, dueDate })
-    : getGeneralReminderMessage({ petName, ownerName, topic: vaccineName, dueDate });
+  const message = customMessage || (
+    reminderType === 'vacuna'
+      ? getVaccineReminderMessage({ petName, ownerName, vaccineName, dueDate })
+      : getGeneralReminderMessage({ petName, ownerName, topic: vaccineName, dueDate })
+  );
 
   const payload = {
     messageId: 'WA-' + Date.now(),
     channel: 'whatsapp_cloud_api',
+    id_mascota,
+    id_propietario,
+    petCode,
     recipient: formatWhatsAppPhone(ownerPhone),
     petName,
     ownerName,
     reminderType,
     dueDate,
     message,
+    generadoPorIA,
     scheduledAt: new Date().toISOString(),
     status: 'scheduled_external_api'
   };
 
-  // Intentar notificar al backend si está disponible
+  let backendResponse = null;
   try {
-    await fetch(`${API_BASE}/reminders/whatsapp`, {
+    const resp = await fetch(`${API_BASE}/reminders/whatsapp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
-    }).catch(() => {
-      // Si el backend no está corriendo aún, continúa localmente
     });
+    if (resp.ok) {
+      backendResponse = await resp.json();
+    }
   } catch {
     // Modo offline resiliente
   }
 
-  // Guardar en almacenamiento local para persistencia
   const current = getStoredReminders();
-  current.unshift(payload);
+  current.unshift({
+    ...payload,
+    messageId: backendResponse?.messageId || payload.messageId,
+    provider: backendResponse?.provider || 'Huellas Gateway Local',
+  });
   localStorage.setItem('huellas_reminders', JSON.stringify(current.slice(0, 30)));
 
   return {
     success: true,
-    data: payload,
+    data: { ...payload, ...(backendResponse || {}) },
     directLink: generateWhatsAppLink(ownerPhone, message)
   };
 }
 
-/**
- * Obtiene los recordatorios almacenados
- */
 export function getStoredReminders() {
   try {
     const raw = localStorage.getItem('huellas_reminders');
@@ -130,4 +123,56 @@ export function getStoredReminders() {
   } catch {
     return [];
   }
+}
+
+export function generateSmartReminderAI(params) {
+  return apiFetch('/ia/recordatorio-inteligente', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export function generateClinicalSummaryAI(params) {
+  return apiFetch('/ia/resumen-clinico', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export function fetchPredictiveAlertsAI() {
+  return apiFetch('/ia/alertas-predictivas');
+}
+
+export function askEmergencyAssistantAI(params) {
+  return apiFetch('/ia/asistente-emergencia', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export function sendAutoBatchMessages(params) {
+  return apiFetch('/mensajeria/enviar-automatico', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export function sendDirectMessageDB(params) {
+  return apiFetch('/mensajeria/enviar', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export function fetchRegisteredNumbersDB() {
+  return apiFetch('/mensajeria/numeros');
+}
+
+export function fetchRemindersDB(correo = '') {
+  const qs = correo ? `?correo=${encodeURIComponent(correo)}` : '';
+  return apiFetch(`/mensajeria/recordatorios${qs}`);
+}
+
+export function fetchMessagingHistoryDB() {
+  return apiFetch('/mensajeria/historial');
 }

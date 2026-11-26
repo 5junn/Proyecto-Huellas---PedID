@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import Icon from './Icon';
+import { getApiBase } from '../services/apiClient';
 
 export default function CollarQRTag({
   pet,
@@ -11,7 +12,6 @@ export default function CollarQRTag({
 }) {
   const [copied, setCopied] = useState(false);
   const [realQrDataUrl, setRealQrDataUrl] = useState('');
-  const [generating, setGenerating] = useState(true);
 
   // Detección de host de red local para que el celular abra la página al escanear
   const [networkHost, setNetworkHost] = useState(() => {
@@ -19,13 +19,14 @@ export default function CollarQRTag({
       if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
         return window.location.host;
       }
+      return window.location.host || 'localhost:5173';
     }
-    return '10.165.139.250:5173';
+    return 'localhost:5173';
   });
 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      fetch('http://localhost:4000/api/network-ip')
+      fetch(`${getApiBase()}/network-ip`)
         .then((r) => r.json())
         .then((data) => {
           if (data?.ip && data.ip !== 'localhost') {
@@ -36,14 +37,14 @@ export default function CollarQRTag({
     }
   }, []);
 
-  if (!pet) return null;
-
   const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-  const qrTargetUrl = `${protocol}//${networkHost}/pet/${pet.codigoQR || 'HP-4092'}`;
+  const qrCodeValue = pet?.codigoQR || pet?.codigo || 'HP-4092';
+  const qrTargetUrl = `${protocol}//${networkHost}/pet/${qrCodeValue}`;
 
   // Generación matemática de Código QR 100% Real y Escaneable (Nivel de corrección H)
   useEffect(() => {
-    setGenerating(true);
+    if (!pet) return undefined;
+    let active = true;
     QRCode.toDataURL(qrTargetUrl, {
       width: compact ? 200 : 260,
       margin: 1,
@@ -54,14 +55,18 @@ export default function CollarQRTag({
       errorCorrectionLevel: 'H'
     })
       .then((url) => {
-        setRealQrDataUrl(url);
-        setGenerating(false);
+        if (active) setRealQrDataUrl(url);
       })
       .catch((err) => {
         console.error('Error generando código QR real:', err);
-        setGenerating(false);
       });
-  }, [qrTargetUrl, compact]);
+
+    return () => {
+      active = false;
+    };
+  }, [pet, qrTargetUrl, compact]);
+
+  if (!pet) return null;
 
   const handleCopyLink = () => {
     navigator.clipboard?.writeText(qrTargetUrl);
@@ -75,7 +80,6 @@ export default function CollarQRTag({
 
   return (
     <div className={`hp-collar-display ${compact ? 'compact' : ''}`} style={{ textAlign: 'center' }}>
-      {/* VISTA DEL COLLAR Y PLACA */}
       <div
         className="hp-collar-rig"
         style={{
@@ -85,7 +89,6 @@ export default function CollarQRTag({
           margin: '0 auto'
         }}
       >
-        {/* CORREA DEL COLLAR */}
         <div
           style={{
             position: 'relative',
@@ -101,7 +104,6 @@ export default function CollarQRTag({
             overflow: 'hidden'
           }}
         >
-          {/* Remaches decorativos */}
           <div style={{ display: 'flex', gap: '8px' }}>
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#94A3B8', boxShadow: 'inset 0 1px 2px #000' }} />
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#94A3B8', boxShadow: 'inset 0 1px 2px #000' }} />
@@ -115,7 +117,6 @@ export default function CollarQRTag({
           </div>
         </div>
 
-        {/* ARGOLLA METÁLICA DE SUSPENSIÓN */}
         <div
           style={{
             width: '26px',
@@ -130,7 +131,6 @@ export default function CollarQRTag({
           }}
         />
 
-        {/* MEDALLA / PLACA METÁLICA INTELIGENTE CON QR REAL */}
         <div
           style={{
             position: 'relative',
@@ -144,7 +144,6 @@ export default function CollarQRTag({
             zIndex: 3
           }}
         >
-          {/* Remache superior */}
           <div
             style={{
               width: '12px',
@@ -172,7 +171,6 @@ export default function CollarQRTag({
             {pet.nombre?.toUpperCase() || 'MI MASCOTA'}
           </h4>
 
-          {/* CÓDIGO QR REAL GENERADO */}
           <div
             onClick={() => {
               if (onScanSimulate) {
@@ -217,12 +215,11 @@ export default function CollarQRTag({
                   fontSize: '0.75rem'
                 }}
               >
-                {generating ? 'Generando QR real...' : 'QR Listo'}
+                Generando QR real...
               </div>
             )}
           </div>
 
-          {/* INDICADOR DE QR REAL Y ESCANEABLE */}
           <div
             style={{
               display: 'inline-flex',
@@ -241,7 +238,7 @@ export default function CollarQRTag({
           </div>
 
           <div style={{ marginTop: '0.3rem', fontSize: '0.78rem', fontWeight: 800, color: '#F8FAFC' }}>
-            ID: <span style={{ color: '#38BDF8' }}>{pet.codigoQR || 'HP-4092'}</span>
+            ID: <span style={{ color: '#38BDF8' }}>{qrCodeValue}</span>
           </div>
 
           <div style={{
@@ -263,7 +260,6 @@ export default function CollarQRTag({
         </div>
       </div>
 
-      {/* ACCIONES Y BOTONES */}
       {showActions && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '360px', margin: '1rem auto 0' }}>
           <a
