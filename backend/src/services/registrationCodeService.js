@@ -2,6 +2,7 @@ const { createHmac, randomBytes, randomInt, timingSafeEqual } = require('node:cr
 const db = require('../db');
 const { getSigningSecret } = require('../utils/security');
 const { sendThroughExternalProvider } = require('./messagingService');
+const { registrationEmail } = require('../templates/registrationEmail');
 
 const MAX_ATTEMPTS = 5;
 
@@ -46,8 +47,7 @@ async function requestRegistrationCode(correo) {
     await sendThroughExternalProvider({
       canal: 'Correo',
       toEmail: correo,
-      subject: 'Código de registro de Huellas PetID',
-      message: `Tu código de verificación es ${code}. Vence en 10 minutos. Si no pediste el código, puedes ignorar este correo.`,
+      ...registrationEmail(code),
     });
   } catch {
     await db.queryAsync(
