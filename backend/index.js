@@ -8,6 +8,7 @@ const { initDatabase } = require('./src/dbInit');
 const { startScheduler } = require('./src/services/schedulerService');
 const { dispatchMessage } = require('./src/services/messagingService');
 const { sanitizeText } = require('./src/utils/security');
+const { RECEPTION_ROLES, requireSession, allowRoles } = require('./src/utils/session');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -65,7 +66,7 @@ app.get('/api/network-ip', (req, res) => {
 });
 
 // Endpoint compatible de Recordatorios por WhatsApp conectado a la BD y servicio de mensajería
-app.post('/api/reminders/whatsapp', async (req, res) => {
+app.post('/api/reminders/whatsapp', requireSession, allowRoles(RECEPTION_ROLES), async (req, res) => {
   try {
     const body = req.body || {};
     const recipient = sanitizeText(body.recipient || body.ownerPhone || '', 40);

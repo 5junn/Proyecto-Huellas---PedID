@@ -14,10 +14,8 @@ function hashPassword(password) {
 }
 
 function verifyPassword(password, storedHash) {
-  if (!password || !storedHash) return false;
-  if (storedHash === DEMO_SEED_HASH) {
-    return password === 'password123';
-  }
+  if (typeof password !== 'string' || !password || password.length > 128 ||
+      password === 'password123' || typeof storedHash !== 'string') return false;
   if (storedHash.startsWith('scrypt:')) {
     const parts = storedHash.split(':');
     if (parts.length !== 3) return false;
@@ -97,6 +95,7 @@ function isValidEmail(email) {
 }
 
 module.exports = {
+  DEMO_SEED_HASH,
   hashPassword,
   verifyPassword,
   signToken,

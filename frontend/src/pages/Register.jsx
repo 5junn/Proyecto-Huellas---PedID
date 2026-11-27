@@ -1,6 +1,6 @@
 // src/pages/Register.jsx
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AuthLayout from '../components/AuthLayout';
 import PasswordInput from '../components/PasswordInput';
 import Icon from '../components/Icon';
@@ -8,6 +8,8 @@ import { registrarUsuarioPropietario } from '../services/authService';
 
 export default function Register() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirect = searchParams.get('redirect');
   const [formData, setFormData] = useState({
     nombres: '',
     dni: '',
@@ -17,7 +19,6 @@ export default function Register() {
     password: '',
   });
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleChange = (e) => {
@@ -28,13 +29,11 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setSuccess('');
     setLoading(true);
 
     try {
       await registrarUsuarioPropietario(formData);
-      setSuccess('¡Cuenta de propietario creada con éxito! Redirigiendo al inicio de sesión...');
-      setTimeout(() => navigate('/login'), 1600);
+      navigate(['/registrar-mascota', '/registro-mascota'].includes(redirect) ? redirect : '/propietario', { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -63,14 +62,7 @@ export default function Register() {
         </div>
       )}
 
-      {success && (
-        <div className="auth-alert success animate-fade" role="status">
-          <Icon name="check" size={18} />
-          <span>{success}</span>
-        </div>
-      )}
-
-      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+      <form className="auth-form" onSubmit={handleSubmit}>
         <div className="form-group">
           <label htmlFor="nombres">Nombres y Apellidos Completos</label>
           <div className="input-wrapper">

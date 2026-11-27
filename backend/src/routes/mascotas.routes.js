@@ -1,9 +1,13 @@
+const { randomBytes } = require('node:crypto');
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { normalizePhone, sanitizeText } = require('../utils/security');
+const { sanitizeText } = require('../utils/security');
 const { sendLostPetAlert } = require('../services/messagingService');
-const { generateSmartReminder } = require('../services/aiService');
+const { STAFF_ROLES, OWNER_ROLES, RECEPTION_ROLES, requireSession, allowRoles } = require('../utils/session');
+
+const petAccess = [requireSession, allowRoles([...STAFF_ROLES, ...OWNER_ROLES])];
+const ownerScope = (user) => OWNER_ROLES.includes(user.rol) ? user.id_propietario : null;
 
 function mapSpeciesToDb(especie) {
   const s = String(especie || '').toLowerCase();
@@ -16,19 +20,19 @@ function mapSpeciesToDb(especie) {
 
 function parseWeightKg(peso) {
   if (peso === null || peso === undefined || peso === '') return null;
-  const num = parseFloat(String(peso).replace(/[^0-9.]/g, ''));
-  return Number.isFinite(num) && num > 0 ? num : null;
+  const num = Number(String(peso).trim().replace(/ kg$/i, '').replace(',', '.'));
+  return Number.isFinite(num) && num > 0 && num <= 999.99 ? num : null;
 }
 
 /**
  * 1. GET /api/mascotas
  * Obtiene todas las mascotas con su propietario, raza y vacunas del carnet.
  */
-router.get('/', async (req, res) => {
+router.get('/', petAccess, async (req, res) => {
   try {
     const correoFilter = sanitizeText(req.query.correo, 120).toLowerCase();
     const especieFilter = sanitizeText(req.query.especie, 40);
-    const propIdFilter = req.query.propietarioId ? Number(req.query.propietarioId) : null;
+    const propIdFilter = ownerScope(req.user) || (Number(req.query.propietarioId) || null);
 
     let sql = `
       SELECT
@@ -61,9 +65,12 @@ router.get('/', async (req, res) => {
     sql += ' ORDER BY m.id_mascota DESC';
 
     const [mascotas] = await db.queryAsync(sql, params);
-    const [vacunas] = await db.queryAsync(
-      `SELECT * FROM carnet_vacunacion ORDER BY fecha_aplicacion DESC, id_vacunacion DESC`
-    );
+    const [vacunas] = mascotas.length
+      ? await db.queryAsync(
+        'SELECT * FROM carnet_vacunacion WHERE id_mascota IN (?) ORDER BY fecha_aplicacion DESC, id_vacunacion DESC',
+        [mascotas.map((m) => m.id_mascota)]
+      )
+      : [[]];
 
     const vacunasByPet = new Map();
     for (const v of vacunas) {
@@ -112,15 +119,17 @@ router.get('/', async (req, res) => {
  * 2. GET /api/mascotas/alertas-gps
  * Lista las alertas de rescate GPS almacenadas en MySQL.
  */
-router.get('/alertas-gps', async (req, res) => {
+router.get('/alertas-gps', petAccess, async (req, res) => {
   try {
+    const ownerId = ownerScope(req.user);
     const [rows] = await db.queryAsync(
       `SELECT a.*, m.nombre AS nombreMascota, m.especie, m.raza, p.nombres AS propietario, p.telefono
        FROM alertas_rescate_gps a
        INNER JOIN mascotas m ON a.id_mascota = m.id_mascota
        INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
-       WHERE a.estado = 'activa'
-       ORDER BY a.id_alerta DESC`
+       WHERE a.estado = 'activa'${ownerId ? ' AND m.id_propietario = ?' : ''}
+       ORDER BY a.id_alerta DESC`,
+      ownerId ? [ownerId] : []
     );
 
     const formatted = rows.map((r) => ({
@@ -158,11 +167,17 @@ router.get('/alertas-gps', async (req, res) => {
 /**
  * 3. PATCH /api/mascotas/alertas-gps/:id/resolver
  */
-router.patch('/alertas-gps/:id/resolver', async (req, res) => {
+router.patch('/alertas-gps/:id/resolver', petAccess, async (req, res) => {
   try {
     const id = Number(req.params.id);
-    if (!id) return res.status(400).json({ error: 'ID de alerta inválido' });
-    await db.queryAsync("UPDATE alertas_rescate_gps SET estado = 'resuelta' WHERE id_alerta = ?", [id]);
+    if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'ID de alerta inválido' });
+    const ownerId = ownerScope(req.user);
+    const [result] = await db.queryAsync(
+      `UPDATE alertas_rescate_gps a JOIN mascotas m ON a.id_mascota = m.id_mascota
+       SET a.estado = 'resuelta' WHERE a.id_alerta = ?${ownerId ? ' AND m.id_propietario = ?' : ''}`,
+      ownerId ? [id, ownerId] : [id]
+    );
+    if (!result.affectedRows) return res.status(404).json({ error: 'Alerta no encontrada.' });
     res.json({ success: true, id_alerta: id, estado: 'resuelta' });
   } catch (err) {
     console.error('Error resolviendo alerta GPS:', err);
@@ -186,9 +201,9 @@ router.get('/:codigo', async (req, res) => {
        FROM mascotas m
        LEFT JOIN razas r ON m.id_raza = r.id_raza
        LEFT JOIN propietarios p ON m.id_propietario = p.id_propietario
-       WHERE UPPER(m.codigo_qr) = ? OR CAST(m.id_mascota AS CHAR) = ?
+       WHERE m.codigo_qr = ?
        LIMIT 1`,
-      [codigo, codigo]
+      [codigo]
     );
 
     if (rows.length === 0) {
@@ -203,11 +218,9 @@ router.get('/:codigo', async (req, res) => {
 
     const isLost = Boolean(m.modo_extraviado);
     const fullAddress = m.propietario_direccion || 'Lima, Perú';
-    const districtOnly = fullAddress.includes(',') ? fullAddress.split(',').slice(-2).join(',').trim() : fullAddress;
+    const districtOnly = fullAddress.includes(',') ? fullAddress.split(',').slice(-1)[0].trim() : null;
 
     res.json({
-      id_mascota: m.id_mascota,
-      id_propietario: m.id_propietario,
       codigo: m.codigo_qr,
       codigoQR: m.codigo_qr,
       nombre: m.nombre,
@@ -222,9 +235,9 @@ router.get('/:codigo', async (req, res) => {
       estadoExtravio: isLost,
       recompensa: isLost ? m.recompensa : null,
       // Privacidad Ley N° 29733: solo exponer teléfono de contacto directo si está en Modo Mascota Perdida
-      propietario: m.propietario_nombre,
+      propietario: isLost ? m.propietario_nombre : null,
       telefono: isLost ? m.propietario_telefono : null,
-      distrito: districtOnly,
+      distrito: isLost ? districtOnly : null,
       clinica: process.env.CLINIC_NAME || 'Clínica Veterinaria Huellas',
       dirClinica: process.env.CLINIC_ADDRESS || 'Av. Primavera 1234, Santiago de Surco, Lima',
       telClinica: process.env.CLINIC_PHONE || '+51 987 654 321',
@@ -244,195 +257,100 @@ router.get('/:codigo', async (req, res) => {
 });
 
 /**
- * 5. POST /api/mascotas
- * Registra mascota, vincula/crea propietario si hace falta, guarda peso inicial,
- * vacuna inicial y programa recordatorio automático en MySQL.
+ * Registra el paciente y su peso inicial, con un recordatorio preventivo opcional.
+ * Las vacunas aplicadas se registran por separado en el módulo clínico.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireSession, allowRoles([...RECEPTION_ROLES, ...OWNER_ROLES]), async (req, res) => {
   try {
     const body = req.body || {};
     const nombre = sanitizeText(body.nombre, 80);
-    if (!nombre) {
-      return res.status(400).json({ error: 'El nombre de la mascota es obligatorio.' });
+    const pesoInput = body.peso_actual ?? body.peso;
+    const peso = parseWeightKg(pesoInput);
+    if (!nombre || (pesoInput != null && pesoInput !== '' && peso === null)) {
+      return res.status(400).json({ error: 'Ingresa un nombre y, si indicas el peso, usa un valor válido en kg.' });
     }
 
-    const especieDb = mapSpeciesToDb(body.especie);
-    const razaNombre = sanitizeText(body.raza || 'Mestizo', 80);
-    const sexo = body.sexo === 'Hembra' ? 'Hembra' : 'Macho';
-    const edad = sanitizeText(body.edad || '1 año', 50);
-    const pesoNum = parseWeightKg(body.peso_actual ?? body.peso);
-    const color = sanitizeText(body.color || 'Varios', 80);
-    const fotoUrl = body.foto_url || body.foto || null;
-    const alergias = sanitizeText(body.alergias || 'Sin alergias reportadas.', 500);
-    const codigoQR = sanitizeText(body.codigo_qr || body.codigoQR || `HP-${Math.floor(1000 + Math.random() * 9000)}`, 50).toUpperCase();
-    const microchip = sanitizeText(body.microchip || body.chip || `981${Math.floor(100000 + Math.random() * 900000)}`, 50);
+    const ownerId = ownerScope(req.user) || Number(body.id_propietario);
+    if (!Number.isSafeInteger(ownerId) || ownerId < 1) {
+      return res.status(400).json({ error: 'Selecciona un propietario registrado.' });
+    }
 
-    const ownerName = sanitizeText(body.propietario_nombre || body.propietario || 'Propietario Huellas', 120);
-    const ownerPhone = normalizePhone(body.propietario_telefono || body.telefono || '987654321');
-    const ownerEmail = sanitizeText(body.propietario_correo || body.correo || '', 120).toLowerCase();
-    const ownerDni = sanitizeText(body.propietario_dni || body.dni || '', 20);
-    const ownerDir = sanitizeText(body.propietario_direccion || body.direccion || 'Lima, Perú', 255);
+    const especie = mapSpeciesToDb(body.especie);
+    const raza = sanitizeText(body.raza || body.raza_nombre || 'Mestizo', 80);
+    const sexo = body.sexo === 'Hembra' ? 'Hembra' : 'Macho';
+    const foto = body.foto_url || body.foto || null;
+    if (foto && (typeof foto !== 'string' || !/^(https?:\/\/|data:image\/(jpeg|png|webp|gif);base64,)/i.test(foto))) {
+      return res.status(400).json({ error: 'Usa una imagen JPG, PNG, WebP o GIF.' });
+    }
+    const placaSolicitada = ownerScope(req.user) ? '' : sanitizeText(body.codigo_qr || body.codigoQR, 50);
+    if (placaSolicitada && !/^[a-z0-9-]+$/i.test(placaSolicitada)) {
+      return res.status(400).json({ error: 'El código de placa solo admite letras, números y guiones.' });
+    }
+    const codigoQR = (placaSolicitada || `HP-${randomBytes(12).toString('hex')}`).toUpperCase();
+    const microchip = sanitizeText(body.microchip || body.chip, 50) || null;
+    const recordatorio = sanitizeText(body.recordatorio_preventivo, 120);
+    const dias = Number(body.reminderDays);
+    if (recordatorio && ![15, 30, 60, 90].includes(dias)) {
+      return res.status(400).json({ error: 'Selecciona un plazo válido para el recordatorio.' });
+    }
 
     const created = await db.withTransaction(async (conn) => {
-      // Resolver id_propietario
-      let idPropietario = body.id_propietario ? Number(body.id_propietario) : null;
+      const [[owner]] = await conn.query(
+        `SELECT p.id_propietario, p.nombres, p.telefono, p.correo FROM propietarios p
+         INNER JOIN usuarios u ON p.id_usuario = u.id_usuario OR (
+           p.id_usuario IS NULL AND p.correo = u.correo AND p.dni = u.dni
+         )
+         WHERE p.id_propietario = ? AND u.rol = 'Propietario' AND u.estado = 'activo' LIMIT 1`,
+        [ownerId]
+      );
+      if (!owner) return null;
 
-      if (!idPropietario && ownerEmail) {
-        const [byEmail] = await conn.query(
-          'SELECT id_propietario FROM propietarios WHERE LOWER(correo) = ? LIMIT 1',
-          [ownerEmail]
-        );
-        if (byEmail.length > 0) idPropietario = byEmail[0].id_propietario;
-      }
-
-      if (!idPropietario && ownerPhone) {
-        const [byPhone] = await conn.query(
-          'SELECT id_propietario FROM propietarios WHERE telefono = ? OR LOWER(nombres) = ? LIMIT 1',
-          [ownerPhone, ownerName.toLowerCase()]
-        );
-        if (byPhone.length > 0) idPropietario = byPhone[0].id_propietario;
-      }
-
-      if (!idPropietario) {
-        const fallbackEmail = ownerEmail || `owner.${Date.now()}.${Math.floor(Math.random() * 999)}@huellas.local`;
-        const fallbackDni = /^\d{8}$/.test(ownerDni) ? ownerDni : String(Math.floor(10000000 + Math.random() * 89999999));
-        const [newProp] = await conn.query(
-          `INSERT INTO propietarios (nombres, dni, telefono, correo, direccion)
-           VALUES (?, ?, ?, ?, ?)`,
-          [ownerName, fallbackDni, ownerPhone || '987654321', fallbackEmail, ownerDir]
-        );
-        idPropietario = newProp.insertId;
-      }
-
-      // Resolver id_raza
-      let idRaza = body.id_raza ? Number(body.id_raza) : null;
-      if (!idRaza && razaNombre) {
-        const [rRows] = await conn.query(
-          'SELECT id_raza FROM razas WHERE LOWER(nombre_raza) = ? LIMIT 1',
-          [razaNombre.toLowerCase()]
-        );
-        if (rRows.length > 0) idRaza = rRows[0].id_raza;
-      }
-
-      const [petRes] = await conn.query(
+      const [[razaRow]] = await conn.query('SELECT id_raza FROM razas WHERE nombre_raza = ? AND especie = ? LIMIT 1', [raza, especie]);
+      const [pet] = await conn.query(
         `INSERT INTO mascotas
-         (id_propietario, id_raza, codigo_qr, microchip, nombre, especie, raza, sexo, edad, fecha_nacimiento, peso_actual, color, foto_url, alergias, estado)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Activo')`,
+         (id_propietario, id_raza, codigo_qr, microchip, nombre, especie, raza, sexo, edad, fecha_nacimiento, peso_actual, color, foto_url, alergias)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          idPropietario,
-          idRaza,
-          codigoQR,
-          microchip,
-          nombre,
-          especieDb,
-          razaNombre,
-          sexo,
-          edad,
-          body.fecha_nacimiento || null,
-          pesoNum,
-          color,
-          fotoUrl,
-          alergias,
+          ownerId, razaRow?.id_raza || null, codigoQR, microchip, nombre, especie, raza, sexo,
+          sanitizeText(body.edad, 50) || null, body.fecha_nacimiento || null, peso,
+          sanitizeText(body.color, 80) || null, foto, sanitizeText(body.alergias, 500) || null,
         ]
       );
-      const idMascota = petRes.insertId;
-
-      if (pesoNum) {
+      if (peso !== null) {
         await conn.query(
-          `INSERT INTO registro_pesos (id_mascota, peso_kg, origen) VALUES (?, ?, 'registro')`,
-          [idMascota, pesoNum]
+          "INSERT INTO registro_pesos (id_mascota, peso_kg, origen) VALUES (?, ?, 'registro')",
+          [pet.insertId, peso]
         );
       }
 
-      // Si viene vacuna inicial o días de recordatorio, guardarla en carnet_vacunacion
-      let idVacunacion = null;
-      const vacunaInicial = sanitizeText(body.vacuna_inicial || body.vaccineName || '', 120);
-      const reminderDays = Number(body.reminderDays) || 30;
-
-      if (vacunaInicial) {
-        const dueDate = new Date(Date.now() + reminderDays * 86400000);
-        const dueSql = dueDate.toISOString().slice(0, 10);
-        const [vaxRes] = await conn.query(
-          `INSERT INTO carnet_vacunacion
-           (id_mascota, veterinario_nombre, vacuna, lote_fabricante, fecha_aplicacion, fecha_proximo_refuerzo, estado_dosis)
-           VALUES (?, ?, ?, ?, CURDATE(), ?, ?)`,
-          [
-            idMascota,
-            sanitizeText(body.veterinario_nombre || 'Dra. Ana Torres Paredes', 120),
-            vacunaInicial,
-            sanitizeText(body.lote || `LT-${Math.floor(1000 + Math.random() * 8999)}`, 60),
-            dueSql,
-            reminderDays <= 7 ? 'por-vencer' : 'al-dia',
-          ]
+      let idRecordatorio = null;
+      if (recordatorio && owner.telefono) {
+        const asunto = sanitizeText(`Recordatorio preventivo para ${nombre}`, 150);
+        const mensaje = `Hola ${owner.nombres}. Te recordamos consultar con tu clínica sobre ${recordatorio} para ${nombre}.`;
+        const [reminder] = await conn.query(
+          `INSERT INTO recordatorios
+           (id_mascota, id_propietario, canal, asunto, mensaje, telefono_destino, correo_destino, fecha_programada)
+           VALUES (?, ?, 'WhatsApp', ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+          [pet.insertId, ownerId, asunto, mensaje, owner.telefono, owner.correo, dias]
         );
-        idVacunacion = vaxRes.insertId;
+        idRecordatorio = reminder.insertId;
       }
 
       return {
-        id_mascota: idMascota,
-        id_propietario: idPropietario,
-        id_vacunacion: idVacunacion,
+        id_mascota: pet.insertId,
+        id_propietario: ownerId,
         codigo_qr: codigoQR,
         microchip,
-        nombre,
-        especie: especieDb,
-        raza: razaNombre,
-        ownerName,
-        ownerPhone,
-        ownerEmail,
-        vacunaInicial,
-        reminderDays,
-        alergias,
+        id_recordatorio: idRecordatorio,
       };
     });
 
-    // Programar recordatorio inteligente en BD si aplica
-    if (created.vacunaInicial && (body.programar_recordatorio !== false)) {
-      try {
-        const dueDate = new Date(Date.now() + created.reminderDays * 86400000);
-        const aiDraft = await generateSmartReminder({
-          petName: created.nombre,
-          species: created.especie,
-          breed: created.raza,
-          ownerName: created.ownerName,
-          vaccineName: created.vacunaInicial,
-          dueDate: dueDate.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }),
-          daysRemaining: created.reminderDays,
-          allergies: created.alergias,
-          channel: 'WhatsApp',
-        });
-
-        await db.queryAsync(
-          `INSERT INTO recordatorios
-           (id_mascota, id_propietario, id_vacunacion, canal, asunto, mensaje, telefono_destino, correo_destino, fecha_programada, estado, generado_por_ia)
-           VALUES (?, ?, ?, 'WhatsApp', ?, ?, ?, ?, ?, 'Programado', 1)`,
-          [
-            created.id_mascota,
-            created.id_propietario,
-            created.id_vacunacion,
-            aiDraft.asunto,
-            aiDraft.mensaje,
-            created.ownerPhone || '987654321',
-            created.ownerEmail || null,
-            dueDate,
-          ]
-        );
-      } catch (remErr) {
-        console.warn('[Mascota POST] Recordatorio no programado:', remErr.message);
-      }
-    }
-
-    res.status(201).json({
-      success: true,
-      mensaje: '¡Mascota registrada exitosamente en la base de datos!',
-      id_mascota: created.id_mascota,
-      id_propietario: created.id_propietario,
-      codigo_qr: created.codigo_qr,
-      microchip: created.microchip,
-    });
+    if (!created) return res.status(404).json({ error: 'El propietario debe tener una cuenta activa antes de registrar la mascota.' });
+    return res.status(201).json({ success: true, ...created });
   } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ya existe una mascota con esa placa o microchip.' });
     console.error('Error al registrar la mascota:', err);
-    res.status(500).json({ error: 'Error al guardar en la base de datos', detalles: err.message });
+    return res.status(500).json({ error: 'Error al guardar la mascota en la base de datos.' });
   }
 });
 
@@ -440,16 +358,21 @@ router.post('/', async (req, res) => {
  * 6. PATCH /api/mascotas/:id/extravio
  * Activa o desactiva el Modo Mascota Perdida en MySQL y notifica por WhatsApp al dueño.
  */
-router.patch('/:id/extravio', async (req, res) => {
+router.patch('/:id/extravio', petAccess, async (req, res) => {
   try {
     const idParam = sanitizeText(req.params.id, 50);
+    const ownerId = ownerScope(req.user);
+    const nuevoEstado = req.body?.estadoExtravio;
+    if (typeof nuevoEstado !== 'boolean') {
+      return res.status(400).json({ error: 'Indica si deseas activar o desactivar el modo extravío.' });
+    }
     const [rows] = await db.queryAsync(
       `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
        FROM mascotas m
        INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
-       WHERE UPPER(m.codigo_qr) = ? OR CAST(m.id_mascota AS CHAR) = ?
-       LIMIT 1`,
-      [idParam.toUpperCase(), idParam]
+       WHERE (m.codigo_qr = ? OR CAST(m.id_mascota AS CHAR) = ?)
+       ${ownerId ? 'AND m.id_propietario = ?' : ''} LIMIT 1`,
+      ownerId ? [idParam, idParam, ownerId] : [idParam, idParam]
     );
 
     if (rows.length === 0) {
@@ -457,17 +380,12 @@ router.patch('/:id/extravio', async (req, res) => {
     }
 
     const pet = rows[0];
-    const nuevoEstado =
-      typeof req.body?.estadoExtravio === 'boolean'
-        ? req.body.estadoExtravio
-        : !Boolean(pet.modo_extraviado);
+    const [result] = await db.queryAsync(
+      'UPDATE mascotas SET modo_extraviado = ? WHERE id_mascota = ? AND id_propietario = ? AND modo_extraviado <> ?',
+      [Number(nuevoEstado), pet.id_mascota, pet.id_propietario, Number(nuevoEstado)]
+    );
 
-    await db.queryAsync('UPDATE mascotas SET modo_extraviado = ? WHERE id_mascota = ?', [
-      nuevoEstado ? 1 : 0,
-      pet.id_mascota,
-    ]);
-
-    if (nuevoEstado && pet.propietario_telefono) {
+    if (result.affectedRows && nuevoEstado && pet.propietario_telefono) {
       sendLostPetAlert({
         id_mascota: pet.id_mascota,
         id_propietario: pet.id_propietario,
@@ -503,7 +421,8 @@ router.post('/:codigo/alerta-gps', async (req, res) => {
     const precision = Number(req.body?.precision_metros) || 15;
     const mensajeRescatista = sanitizeText(req.body?.mensaje || '', 400);
 
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    if (req.body?.lat == null || req.body?.lng == null ||
+        !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
       return res.status(400).json({ error: 'Coordenadas GPS inválidas.' });
     }
 
@@ -511,13 +430,12 @@ router.post('/:codigo/alerta-gps', async (req, res) => {
       `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
        FROM mascotas m
        INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
-       WHERE UPPER(m.codigo_qr) = ? OR CAST(m.id_mascota AS CHAR) = ?
-       LIMIT 1`,
-      [codigo, codigo]
+       WHERE m.codigo_qr = ? AND m.modo_extraviado = 1 LIMIT 1`,
+      [codigo]
     );
 
     if (rows.length === 0) {
-      return res.status(404).json({ error: 'Mascota no encontrada en la base de datos.' });
+      return res.status(404).json({ error: 'Esta placa no tiene una alerta de extravío activa.' });
     }
 
     const pet = rows[0];

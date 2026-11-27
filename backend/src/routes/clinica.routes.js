@@ -3,51 +3,36 @@ const router = express.Router();
 const db = require('../db');
 const { sanitizeText } = require('../utils/security');
 const { generateSmartReminder } = require('../services/aiService');
+const { STAFF_ROLES, CLINICAL_ROLES, requireSession, allowRoles } = require('../utils/session');
 
-/**
- * Helper: resuelve id_mascota por id numérico, codigo_qr o nombre exacto.
- */
-async function resolvePetRow(connOrDb, { id_mascota, codigo_qr, petName }) {
-  const exec = connOrDb.queryAsync ? connOrDb.queryAsync.bind(connOrDb) : connOrDb.query.bind(connOrDb);
+router.use(requireSession);
+const clinicalOnly = allowRoles(CLINICAL_ROLES);
 
+async function resolvePetRow({ id_mascota, codigo_qr, petName }) {
+  let clause = 'm.nombre = ?';
+  let value = sanitizeText(petName, 80);
   if (id_mascota) {
-    const [rows] = await exec(
-      `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
-       FROM mascotas m INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
-       WHERE m.id_mascota = ? LIMIT 1`,
-      [Number(id_mascota)]
-    );
-    if (rows.length > 0) return rows[0];
+    clause = 'm.id_mascota = ?';
+    value = Number(id_mascota);
+    if (!Number.isSafeInteger(value) || value < 1) return null;
+  } else if (codigo_qr) {
+    clause = 'm.codigo_qr = ?';
+    value = sanitizeText(codigo_qr, 50);
   }
-
-  if (codigo_qr) {
-    const [rows] = await exec(
-      `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
-       FROM mascotas m INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
-       WHERE UPPER(m.codigo_qr) = ? LIMIT 1`,
-      [String(codigo_qr).trim().toUpperCase()]
-    );
-    if (rows.length > 0) return rows[0];
-  }
-
-  if (petName) {
-    const [rows] = await exec(
-      `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
-       FROM mascotas m INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
-       WHERE LOWER(m.nombre) = ? ORDER BY m.id_mascota DESC LIMIT 1`,
-      [String(petName).trim().toLowerCase()]
-    );
-    if (rows.length > 0) return rows[0];
-  }
-
-  return null;
+  const [rows] = await db.queryAsync(
+    `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
+     FROM mascotas m INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
+     WHERE ${clause} LIMIT 2`,
+    [value]
+  );
+  return rows.length === 1 ? rows[0] : null;
 }
 
 /**
  * GET /api/clinica/dashboard
  * Resumen operativo en tiempo real desde MySQL.
  */
-router.get('/dashboard', async (req, res) => {
+router.get('/dashboard', allowRoles(STAFF_ROLES), async (req, res) => {
   try {
     const [[petCount]] = await db.queryAsync('SELECT COUNT(*) AS total FROM mascotas');
     const [[consultCount]] = await db.queryAsync('SELECT COUNT(*) AS total FROM consultas_historial');
@@ -78,7 +63,7 @@ router.get('/dashboard', async (req, res) => {
  * GET /api/clinica/consultas
  * Lista consultas médicas desde MySQL.
  */
-router.get('/consultas', async (req, res) => {
+router.get('/consultas', clinicalOnly, async (req, res) => {
   try {
     const [rows] = await db.queryAsync(
       `SELECT c.*, m.nombre AS pet, COALESCE(r.nombre_raza, m.raza, m.especie) AS breed,
@@ -104,7 +89,7 @@ router.get('/consultas', async (req, res) => {
       borrador_ia: c.borrador_ia,
       peso: c.peso,
       temperatura: c.temperatura,
-      vet: c.veterinario_nombre || 'Dra. Ana Torres Paredes',
+      vet: c.veterinario_nombre || 'Sin profesional registrado',
       time: new Date(c.fecha_hora).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
       fecha_hora: c.fecha_hora,
       status: c.estado,
@@ -121,25 +106,30 @@ router.get('/consultas', async (req, res) => {
  * POST /api/clinica/consultas
  * Guarda una nueva consulta médica en MySQL y actualiza el peso si se proporciona.
  */
-router.post('/consultas', async (req, res) => {
+router.post('/consultas', clinicalOnly, async (req, res) => {
   try {
     const body = req.body || {};
     const reason = sanitizeText(body.reason || body.motivo_consulta, 255);
     const diagnostico = sanitizeText(body.diagnostico || 'Atención clínica registrada.', 2000);
     const tratamiento = sanitizeText(body.tratamiento_receta || '', 2000);
     const borradorIA = sanitizeText(body.borrador_ia || '', 3000);
-    const vetName = sanitizeText(body.vet || body.veterinario_nombre || 'Dra. Ana Torres Paredes', 120);
+    const vetName = req.user.nombres;
     const estado = ['waiting', 'progress', 'done'].includes(body.status || body.estado)
       ? body.status || body.estado
       : 'progress';
-    const peso = body.peso ? parseFloat(body.peso) : null;
-    const temperatura = body.temperatura ? parseFloat(body.temperatura) : null;
+    const peso = body.peso == null || body.peso === '' ? null : Number(body.peso);
+    const temperatura = body.temperatura == null || body.temperatura === '' ? null : Number(body.temperatura);
+
+    if ((peso !== null && (!Number.isFinite(peso) || peso <= 0 || peso > 999.99)) ||
+        (temperatura !== null && (!Number.isFinite(temperatura) || temperatura <= 0 || temperatura > 99.99))) {
+      return res.status(400).json({ error: 'Revisa el peso y la temperatura de la consulta.' });
+    }
 
     if (!reason) {
       return res.status(400).json({ error: 'El motivo de consulta es obligatorio.' });
     }
 
-    const pet = await resolvePetRow(db, {
+    const pet = await resolvePetRow({
       id_mascota: body.id_mascota,
       codigo_qr: body.codigo_qr,
       petName: body.pet || body.mascota_nombre,
@@ -151,35 +141,27 @@ router.post('/consultas', async (req, res) => {
       });
     }
 
-    const [ins] = await db.queryAsync(
-      `INSERT INTO consultas_historial
-       (id_mascota, veterinario_nombre, motivo_consulta, temperatura, peso, diagnostico, tratamiento_receta, borrador_ia, estado)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        pet.id_mascota,
-        vetName,
-        reason,
-        Number.isFinite(temperatura) ? temperatura : null,
-        Number.isFinite(peso) ? peso : null,
-        diagnostico,
-        tratamiento || null,
-        borradorIA || null,
-        estado,
-      ]
-    );
-
-    if (Number.isFinite(peso) && peso > 0) {
-      await db.queryAsync('UPDATE mascotas SET peso_actual = ? WHERE id_mascota = ?', [peso, pet.id_mascota]);
-      await db.queryAsync(
-        `INSERT INTO registro_pesos (id_mascota, peso_kg, origen) VALUES (?, ?, 'consulta')`,
-        [pet.id_mascota, peso]
+    const idConsulta = await db.withTransaction(async (conn) => {
+      const [ins] = await conn.query(
+        `INSERT INTO consultas_historial
+         (id_mascota, id_veterinario, veterinario_nombre, motivo_consulta, temperatura, peso, diagnostico, tratamiento_receta, borrador_ia, estado)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [pet.id_mascota, req.user.id, vetName, reason, temperatura, peso, diagnostico, tratamiento || null, borradorIA || null, estado]
       );
-    }
+      if (peso !== null) {
+        await conn.query('UPDATE mascotas SET peso_actual = ? WHERE id_mascota = ?', [peso, pet.id_mascota]);
+        await conn.query(
+          "INSERT INTO registro_pesos (id_mascota, peso_kg, origen) VALUES (?, ?, 'consulta')",
+          [pet.id_mascota, peso]
+        );
+      }
+      return ins.insertId;
+    });
 
     res.status(201).json({
       success: true,
-      id: `C-${ins.insertId}`,
-      id_consulta: ins.insertId,
+      id: `C-${idConsulta}`,
+      id_consulta: idConsulta,
       id_mascota: pet.id_mascota,
       pet: pet.nombre,
       breed: pet.raza || pet.especie,
@@ -200,15 +182,16 @@ router.post('/consultas', async (req, res) => {
 /**
  * PATCH /api/clinica/consultas/:id/estado
  */
-router.patch('/consultas/:id/estado', async (req, res) => {
+router.patch('/consultas/:id/estado', clinicalOnly, async (req, res) => {
   try {
     const rawId = String(req.params.id).replace(/^C-/i, '');
     const id = Number(rawId);
     const status = req.body?.status || req.body?.estado;
-    if (!id || !['waiting', 'progress', 'done'].includes(status)) {
+    if (!Number.isSafeInteger(id) || id < 1 || !['waiting', 'progress', 'done'].includes(status)) {
       return res.status(400).json({ error: 'ID o estado inválido.' });
     }
-    await db.queryAsync('UPDATE consultas_historial SET estado = ? WHERE id_consulta = ?', [status, id]);
+    const [result] = await db.queryAsync('UPDATE consultas_historial SET estado = ? WHERE id_consulta = ?', [status, id]);
+    if (!result.affectedRows) return res.status(404).json({ error: 'Consulta no encontrada.' });
     res.json({ success: true, id_consulta: id, status });
   } catch (err) {
     console.error('[Clinica Consultas PATCH] Error:', err);
@@ -220,7 +203,7 @@ router.patch('/consultas/:id/estado', async (req, res) => {
  * GET /api/clinica/vacunas
  * Lista carnet de vacunación con estado dinámico calculado desde la fecha de refuerzo.
  */
-router.get('/vacunas', async (req, res) => {
+router.get('/vacunas', clinicalOnly, async (req, res) => {
   try {
     const [rows] = await db.queryAsync(
       `SELECT cv.*, m.nombre AS pet, m.codigo_qr, m.especie, p.id_propietario,
@@ -259,7 +242,7 @@ router.get('/vacunas', async (req, res) => {
         fecha_proximo_refuerzo: v.fecha_proximo_refuerzo,
         dias_restantes: diffDays,
         status: computedStatus,
-        vet: v.veterinario_nombre || 'Dra. Ana Torres Paredes',
+        vet: v.veterinario_nombre || 'Sin profesional registrado',
       };
     });
 
@@ -274,23 +257,28 @@ router.get('/vacunas', async (req, res) => {
  * POST /api/clinica/vacunas
  * Aplica vacuna en MySQL y programa automáticamente el recordatorio inteligente en `recordatorios`.
  */
-router.post('/vacunas', async (req, res) => {
+router.post('/vacunas', clinicalOnly, async (req, res) => {
   try {
     const body = req.body || {};
     const vacuna = sanitizeText(body.vaccine || body.vacuna, 120);
-    const lote = sanitizeText(body.lote || body.lote_fabricante || `LT-${Math.floor(1000 + Math.random() * 9000)}`, 60);
-    const vetName = sanitizeText(body.vet || body.veterinario_nombre || 'Dra. Ana Torres Paredes', 120);
-    const diasRefuerzo = Number(body.dias_refuerzo) || 365;
-    const fechaAplicacion = body.fecha_aplicacion || new Date().toISOString().slice(0, 10);
-    const fechaRefuerzo =
-      body.fecha_proximo_refuerzo ||
-      new Date(Date.now() + diasRefuerzo * 86400000).toISOString().slice(0, 10);
-
-    if (!vacuna) {
-      return res.status(400).json({ error: 'El nombre de la vacuna es obligatorio.' });
+    const lote = sanitizeText(body.lote || body.lote_fabricante, 60);
+    const vetName = req.user.nombres;
+    const diasRefuerzo = Number(body.dias_refuerzo ?? 365);
+    if (!vacuna || !lote || !Number.isInteger(diasRefuerzo) || diasRefuerzo < 1 || diasRefuerzo > 3650) {
+      return res.status(400).json({ error: 'Ingresa una vacuna, el lote aplicado y un plazo de refuerzo válido.' });
     }
 
-    const pet = await resolvePetRow(db, {
+    const fechaAplicacion = body.fecha_aplicacion || new Date().toISOString().slice(0, 10);
+    const fechaRefuerzo = body.fecha_proximo_refuerzo ||
+      new Date(new Date(fechaAplicacion).getTime() + diasRefuerzo * 86400000).toJSON()?.slice(0, 10);
+    const fechasValidas = [fechaAplicacion, fechaRefuerzo].every((fecha) =>
+      typeof fecha === 'string' && new Date(fecha).toJSON()?.slice(0, 10) === fecha
+    );
+    if (!fechasValidas || fechaRefuerzo <= fechaAplicacion) {
+      return res.status(400).json({ error: 'La fecha de refuerzo debe ser posterior a la aplicación.' });
+    }
+
+    const pet = await resolvePetRow({
       id_mascota: body.id_mascota,
       codigo_qr: body.codigo_qr,
       petName: body.pet || body.mascota_nombre,
@@ -308,9 +296,9 @@ router.post('/vacunas', async (req, res) => {
 
     const [ins] = await db.queryAsync(
       `INSERT INTO carnet_vacunacion
-       (id_mascota, veterinario_nombre, vacuna, lote_fabricante, fecha_aplicacion, fecha_proximo_refuerzo, estado_dosis, observaciones)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [pet.id_mascota, vetName, vacuna, lote, fechaAplicacion, fechaRefuerzo, estadoDosis, sanitizeText(body.observaciones || '', 255) || null]
+       (id_mascota, id_veterinario, veterinario_nombre, vacuna, lote_fabricante, fecha_aplicacion, fecha_proximo_refuerzo, estado_dosis, observaciones)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [pet.id_mascota, req.user.id, vetName, vacuna, lote, fechaAplicacion, fechaRefuerzo, estadoDosis, sanitizeText(body.observaciones || '', 255) || null]
     );
 
     const idVacunacion = ins.insertId;
@@ -318,6 +306,7 @@ router.post('/vacunas', async (req, res) => {
 
     // Lógica de negocio: generar y guardar automáticamente el recordatorio para 3 días antes del refuerzo
     try {
+      if (!pet.propietario_telefono && !pet.propietario_correo) throw new Error('El propietario no tiene contacto registrado.');
       const reminderDate = new Date(dueDateObj.getTime() - 3 * 86400000);
       const scheduledAt = reminderDate.getTime() > Date.now() ? reminderDate : new Date();
       const dueStr = dueDateObj.toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -344,7 +333,7 @@ router.post('/vacunas', async (req, res) => {
           aiDraft.canal,
           aiDraft.asunto,
           aiDraft.mensaje,
-          pet.propietario_telefono || '987654321',
+          pet.propietario_telefono || '',
           pet.propietario_correo || null,
           scheduledAt,
         ]

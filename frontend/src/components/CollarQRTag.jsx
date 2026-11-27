@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import QRCode from 'qrcode';
 import Icon from './Icon';
-import { getApiBase } from '../services/apiClient';
+import { apiFetch } from '../services/apiClient';
 
 export default function CollarQRTag({
   pet,
@@ -26,8 +26,7 @@ export default function CollarQRTag({
 
   useEffect(() => {
     if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      fetch(`${getApiBase()}/network-ip`)
-        .then((r) => r.json())
+      apiFetch('/network-ip', { authenticated: false })
         .then((data) => {
           if (data?.ip && data.ip !== 'localhost') {
             setNetworkHost(`${data.ip}:5173`);

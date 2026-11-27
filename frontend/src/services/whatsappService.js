@@ -1,7 +1,5 @@
 // src/services/whatsappService.js
-import { apiFetch, getApiBase } from './apiClient';
-
-const API_BASE = getApiBase();
+import { apiFetch } from './apiClient';
 
 export function formatWhatsAppPhone(phone) {
   if (!phone) return '51987654321';
@@ -51,80 +49,6 @@ export function getGeneralReminderMessage({
     `🏥 *${clinicName}* · Siempre contigo`;
 }
 
-export async function scheduleWhatsAppReminder({
-  id_mascota = null,
-  id_propietario = null,
-  petCode = null,
-  petName,
-  ownerName,
-  ownerPhone,
-  reminderType = 'vacuna',
-  vaccineName = 'Vacuna Antirrábica',
-  dueDate = 'En 30 días',
-  customMessage = null,
-  generadoPorIA = false
-}) {
-  const message = customMessage || (
-    reminderType === 'vacuna'
-      ? getVaccineReminderMessage({ petName, ownerName, vaccineName, dueDate })
-      : getGeneralReminderMessage({ petName, ownerName, topic: vaccineName, dueDate })
-  );
-
-  const payload = {
-    messageId: 'WA-' + Date.now(),
-    channel: 'whatsapp_cloud_api',
-    id_mascota,
-    id_propietario,
-    petCode,
-    recipient: formatWhatsAppPhone(ownerPhone),
-    petName,
-    ownerName,
-    reminderType,
-    dueDate,
-    message,
-    generadoPorIA,
-    scheduledAt: new Date().toISOString(),
-    status: 'scheduled_external_api'
-  };
-
-  let backendResponse = null;
-  try {
-    const resp = await fetch(`${API_BASE}/reminders/whatsapp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
-    if (resp.ok) {
-      backendResponse = await resp.json();
-    }
-  } catch {
-    // Modo offline resiliente
-  }
-
-  const current = getStoredReminders();
-  current.unshift({
-    ...payload,
-    messageId: backendResponse?.messageId || payload.messageId,
-    provider: backendResponse?.provider || 'Huellas Gateway Local',
-  });
-  localStorage.setItem('huellas_reminders', JSON.stringify(current.slice(0, 30)));
-
-  return {
-    success: true,
-    data: { ...payload, ...(backendResponse || {}) },
-    directLink: generateWhatsAppLink(ownerPhone, message)
-  };
-}
-
-export function getStoredReminders() {
-  try {
-    const raw = localStorage.getItem('huellas_reminders');
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
 export function generateSmartReminderAI(params) {
   return apiFetch('/ia/recordatorio-inteligente', {
     method: 'POST',
@@ -145,6 +69,7 @@ export function fetchPredictiveAlertsAI() {
 
 export function askEmergencyAssistantAI(params) {
   return apiFetch('/ia/asistente-emergencia', {
+    authenticated: false,
     method: 'POST',
     body: JSON.stringify(params),
   });

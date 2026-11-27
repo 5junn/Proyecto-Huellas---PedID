@@ -8,6 +8,14 @@ import Dashboard from './pages/Dashboard';
 import OwnerDashboard from './pages/OwnerDashboard';
 import PetQRView from './pages/PetQRView';
 import Emergencias from './pages/Emergencias';
+import RequireSession from './components/RequireSession';
+
+// Elimina contraseñas en texto plano que guardaban versiones anteriores.
+localStorage.removeItem('huellas_registered_users');
+if (localStorage.getItem('huellas_token')?.split('.').length !== 3) {
+  localStorage.removeItem('huellas_token');
+  localStorage.removeItem('huellas_user');
+}
 
 export default function App() {
   return (
@@ -16,10 +24,10 @@ export default function App() {
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
-        <Route path="/registrar-mascota" element={<RegisterPet />} />
-        <Route path="/registro-mascota" element={<RegisterPet />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/propietario" element={<OwnerDashboard />} />
+        <Route path="/registrar-mascota" element={<RequireSession page={RegisterPet} />} />
+        <Route path="/registro-mascota" element={<RequireSession page={RegisterPet} />} />
+        <Route path="/dashboard" element={<RequireSession page={Dashboard} staff />} />
+        <Route path="/propietario" element={<RequireSession page={OwnerDashboard} />} />
         <Route path="/emergencias" element={<Emergencias />} />
         <Route path="/pet/:codigo" element={<PetQRView />} />
         <Route path="/qr/:codigo" element={<PetQRView />} />

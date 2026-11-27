@@ -18,18 +18,16 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
 
   const handlePortalSwitch = (portal) => {
-    setSearchParams(portal === 'staff' ? { portal: 'staff' } : {});
+    const next = new URLSearchParams(searchParams);
+    if (portal === 'staff') next.set('portal', 'staff');
+    else next.delete('portal');
+    setSearchParams(next);
     setError('');
   };
 
   const handleChange = (e) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
     if (error) setError('');
-  };
-
-  const handleQuickFill = (email, pass) => {
-    setFormData({ correo: email, password: pass });
-    setError('');
   };
 
   const handleSubmit = async (e) => {
@@ -39,18 +37,14 @@ export default function Login() {
 
     try {
       if (activePortal === 'staff') {
-        const usuario = await loginPersonalClinico(formData);
-        navigate('/dashboard', { state: { role: usuario.rol } });
+        await loginPersonalClinico(formData);
+        navigate('/dashboard', { replace: true });
       } else {
-        const usuario = await loginUsuarioPropietario(formData);
-        // Si un miembro del staff se loguea por el portal de usuario, lo llevamos a su dashboard clínico
-        if (['Administrador', 'Veterinario', 'Recepcionista'].includes(usuario.rol)) {
-          navigate('/dashboard', { state: { role: usuario.rol } });
-        } else if (redirectUrl) {
-          navigate(redirectUrl);
-        } else {
-          navigate('/propietario');
-        }
+        await loginUsuarioPropietario(formData);
+        const destination = ['/registrar-mascota', '/registro-mascota'].includes(redirectUrl)
+          ? redirectUrl
+          : '/propietario';
+        navigate(destination, { replace: true });
       }
     } catch (err) {
       setError(err.message);
@@ -134,7 +128,7 @@ export default function Login() {
         </div>
       )}
 
-      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+      <form className="auth-form" onSubmit={handleSubmit}>
         <div className="form-group">
           <label htmlFor="correo">
             {isStaffPortal ? 'Correo Institucional Clínico' : 'Correo Electrónico de Propietario'}
@@ -183,50 +177,6 @@ export default function Login() {
         </button>
       </form>
 
-      {/* BOTONES DE PRUEBA RÁPIDA / DEMO */}
-      <div className="auth-quick-demo">
-        <span className="demo-label">Accesos rápidos de demostración:</span>
-        <div className="demo-buttons-row">
-          {isStaffPortal ? (
-            <>
-              <button
-                type="button"
-                className="demo-chip-btn"
-                onClick={() => handleQuickFill('veterinario@huellas.com', 'password123')}
-              >
-                <Icon name="doctor" size={13} />
-                <span>Veterinario</span>
-              </button>
-              <button
-                type="button"
-                className="demo-chip-btn"
-                onClick={() => handleQuickFill('recepcion@huellas.com', 'password123')}
-              >
-                <Icon name="desk" size={13} />
-                <span>Recepción</span>
-              </button>
-              <button
-                type="button"
-                className="demo-chip-btn"
-                onClick={() => handleQuickFill('admin@huellas.com', 'password123')}
-              >
-                <Icon name="shield" size={13} />
-                <span>Admin</span>
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="demo-chip-btn owner"
-              onClick={() => handleQuickFill('propietario@gmail.com', 'password123')}
-            >
-              <Icon name="paw" size={13} />
-              <span>Propietario Demo (Lucía Paredes)</span>
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* PIE DE PÁGINA SEGÚN ROL */}
       {isStaffPortal ? (
         <div className="auth-roles-notice">
@@ -236,7 +186,7 @@ export default function Login() {
       ) : (
         <div className="auth-switch-footer">
           <span>¿Aún no has registrado a tu mascota?</span>
-          <Link to="/register" className="auth-switch-link">
+          <Link to={redirectUrl ? `/register?redirect=${encodeURIComponent(redirectUrl)}` : '/register'} className="auth-switch-link">
             Crear cuenta de propietario gratis
           </Link>
         </div>

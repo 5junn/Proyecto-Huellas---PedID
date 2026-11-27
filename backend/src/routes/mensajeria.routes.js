@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const { RECEPTION_ROLES, requireSession, allowRoles } = require('../utils/session');
+
+router.use(requireSession, allowRoles(RECEPTION_ROLES));
 const { normalizePhone, sanitizeText } = require('../utils/security');
 const {
   dispatchMessage,

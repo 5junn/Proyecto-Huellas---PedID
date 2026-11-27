@@ -1,13 +1,11 @@
 // src/pages/RegisterPet.jsx
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import CollarQRTag from '../components/CollarQRTag';
 import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
-import { scheduleWhatsAppReminder } from '../services/whatsappService';
-import { getUser, isAuthenticated } from '../services/authService';
 import { apiFetch } from '../services/apiClient';
 import { getRazasPorEspecie } from '../data/razasData';
 import { getVacunaSugerida, getListaVacunasPorEspecie } from '../data/vacunasData';
@@ -23,20 +21,9 @@ const DEFAULT_AVATARS = [
   { label: 'Cachorro Mestizo', url: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?auto=format&fit=crop&w=400&q=80' }
 ];
 
-export default function RegisterPet() {
+export default function RegisterPet({ user }) {
   const navigate = useNavigate();
-  const currentUser = getUser();
   const fileInputRef = useRef(null);
-
-  // Verificación estricta: Solo usuarios autenticados pueden registrar mascotas
-  useEffect(() => {
-    if (!isAuthenticated()) {
-      navigate('/login?redirect=/registrar-mascota&msg=auth_required', { replace: true });
-    }
-  }, [navigate]);
-
-  // Generamos un código QR único para la mascota
-  const [generatedCode] = useState(() => 'HP-' + Math.floor(1000 + Math.random() * 9000));
 
   // Datos de la Mascota
   const [petData, setPetData] = useState({
@@ -55,23 +42,15 @@ export default function RegisterPet() {
   const [isCustomPhoto, setIsCustomPhoto] = useState(false);
   const [customPhotoName, setCustomPhotoName] = useState('');
 
-  // Datos del Dueño
-  const [ownerData, setOwnerData] = useState({
-    nombres: currentUser?.nombres || '',
-    dni: currentUser?.dni || '',
-    telefono: currentUser?.telefono || '987 654 321',
-    correo: currentUser?.correo || ''
-  });
-
-  // Lógica de Negocio: Recordatorio WhatsApp por Chatbot (API)
-  const [enableWhatsAppReminder, setEnableWhatsAppReminder] = useState(true);
+  const [enableWhatsAppReminder, setEnableWhatsAppReminder] = useState(false);
   const [reminderType, setReminderType] = useState('vacuna');
-  const [vaccineName, setVaccineName] = useState('Vacuna Antirrábica y Sextuple Canina');
+  const [vaccineName, setVaccineName] = useState(() => getVacunaSugerida('Canino'));
   const [reminderDays, setReminderDays] = useState('30');
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
 
   // Estado del Registro
-  const [submitted, setSubmitted] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [registeredPet, setRegisteredPet] = useState(null);
 
   const handlePetChange = (e) => {
@@ -88,11 +67,6 @@ export default function RegisterPet() {
     } else {
       setPetData((prev) => ({ ...prev, [name]: value }));
     }
-  };
-
-  const handleOwnerChange = (e) => {
-    const { name, value } = e.target;
-    setOwnerData((prev) => ({ ...prev, [name]: value }));
   };
 
   // Manejo de carga de foto desde el dispositivo
@@ -136,103 +110,28 @@ export default function RegisterPet() {
     setIsChatbotOpen(true);
   };
 
-  // Enviar y Registrar Mascota
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!petData.nombre.trim()) return;
-
-    const newPetRecord = {
-      id: generatedCode.toLowerCase(),
-      nombre: petData.nombre,
-      especie: petData.especie,
-      raza: petData.raza || 'Mestizo',
-      edad: petData.edad || '1 año',
-      sexo: petData.sexo,
-      peso: petData.peso ? `${petData.peso} kg` : '10 kg',
-      color: petData.color || 'Varios',
-      codigoQR: generatedCode,
-      estadoExtravio: false,
-      foto: petData.foto,
-      propietario: ownerData.nombres || 'Propietario Huellas',
-      telefono: ownerData.telefono || '987 654 321',
-      correo: ownerData.correo || '',
-      alergias: petData.alergias.trim() || 'Sin alergias conocidas.',
-      vacunas: [
-        {
-          nombre: vaccineName || 'Revisión y Vacunación Inicial',
-          fecha: 'Hoy',
-          proxima: `En ${reminderDays} días`,
-          estado: 'Vigente',
-          vet: 'Dra. Ana Torres (Clínica Huellas)'
-        }
-      ]
-    };
-
-    // Guardar mascota + vacuna + recordatorio en MySQL
-    let dbSaved = null;
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    if (!petData.nombre.trim() || saving) return;
+    setSaving(true);
+    setError('');
     try {
-      dbSaved = await apiFetch('/mascotas', {
+      const topics = { vacuna: vaccineName, desparasitacion: 'desparasitación', control: 'un control preventivo' };
+      const saved = await apiFetch('/mascotas', {
         method: 'POST',
         body: JSON.stringify({
-          id_propietario: currentUser?.id_propietario || null,
-          codigo_qr: generatedCode,
-          nombre: petData.nombre,
-          especie: petData.especie,
-          raza: petData.raza || 'Mestizo',
-          sexo: petData.sexo,
-          edad: petData.edad || '1 año',
-          peso_actual: petData.peso || null,
-          color: petData.color || 'Varios',
-          foto_url: petData.foto,
-          alergias: newPetRecord.alergias,
-          propietario_nombre: ownerData.nombres || currentUser?.nombres || 'Propietario Huellas',
-          propietario_dni: ownerData.dni || currentUser?.dni || '',
-          propietario_telefono: ownerData.telefono || currentUser?.telefono || '987654321',
-          propietario_correo: ownerData.correo || currentUser?.correo || '',
-          propietario_direccion: currentUser?.direccion || 'Lima, Perú',
-          vacuna_inicial: vaccineName,
-          reminderDays: Number(reminderDays) || 30,
-          programar_recordatorio: Boolean(enableWhatsAppReminder)
-        })
+          ...petData,
+          recordatorio_preventivo: enableWhatsAppReminder ? topics[reminderType] : undefined,
+          reminderDays: Number(reminderDays),
+        }),
       });
-    } catch (apiErr) {
-      console.warn('Backend offline al registrar mascota, usando caché local:', apiErr.message);
+      setRegisteredPet({ ...petData, codigoQR: saved.codigo_qr, id_recordatorio: saved.id_recordatorio });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
     }
-
-    if (dbSaved?.id_mascota) {
-      newPetRecord.id_mascota = dbSaved.id_mascota;
-      newPetRecord.id_propietario = dbSaved.id_propietario;
-    }
-
-    // Si activó el recordatorio de WhatsApp, confirmarlo vía endpoint de WhatsApp/BD
-    if (enableWhatsAppReminder) {
-      await scheduleWhatsAppReminder({
-        id_mascota: dbSaved?.id_mascota || null,
-        id_propietario: dbSaved?.id_propietario || currentUser?.id_propietario || null,
-        petCode: generatedCode,
-        petName: newPetRecord.nombre,
-        ownerName: ownerData.nombres || 'Propietario',
-        ownerPhone: ownerData.telefono,
-        reminderType,
-        vaccineName,
-        dueDate: `En ${reminderDays} días`
-      });
-    }
-
-    // Persistir en localStorage
-    try {
-      const stored = localStorage.getItem('huellas_mascotas');
-      const list = stored ? JSON.parse(stored) : [];
-      list.unshift(newPetRecord);
-      localStorage.setItem('huellas_mascotas', JSON.stringify(list));
-      window.dispatchEvent(new Event('huellas_mascotas_updated'));
-    } catch {
-      // Ignorar error de almacenamiento
-    }
-
-    setRegisteredPet(newPetRecord);
-    setSubmitted(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
@@ -267,7 +166,7 @@ export default function RegisterPet() {
         </div>
 
         {/* PANTALLA DE ÉXITO POST REGISTRO */}
-        {submitted && registeredPet ? (
+        {registeredPet ? (
           <div style={{
             background: 'rgba(17, 24, 39, 0.95)',
             border: '2px solid #10B981',
@@ -296,7 +195,8 @@ export default function RegisterPet() {
               ¡{registeredPet.nombre} está Protegido(a)!
             </h2>
             <p style={{ color: '#94A3B8', fontSize: '0.95rem', marginBottom: '1.8rem' }}>
-              Se ha generado con éxito su código de trazabilidad <strong>{registeredPet.codigoQR}</strong> con un Código QR Real y se programó el recordatorio médico con HuellasBot.
+              Se guardó tu mascota con el código <strong>{registeredPet.codigoQR}</strong>.
+              {registeredPet.id_recordatorio && ' La solicitud de recordatorio quedó programada.'}
             </p>
 
             {/* COLLAR VISUAL DE LA MASCOTA RECIÉN REGISTRADA */}
@@ -641,54 +541,7 @@ export default function RegisterPet() {
                 </div>
               </div>
 
-              {/* SECCIÓN 2: DATOS DEL PROPIETARIO */}
-              <div style={{ marginBottom: '1.8rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', color: '#38BDF8' }}>
-                  <Icon name="user" size={20} />
-                  <h3 style={{ margin: 0, fontSize: '1.2rem', color: '#FFFFFF' }}>2. Datos del Propietario Responsable</h3>
-                </div>
-
-                <div className="hp-form-grid-2">
-                  <div className="form-group">
-                    <label style={{ color: '#E2E8F0', fontSize: '0.85rem', fontWeight: 600 }}>Nombre Completo *</label>
-                    <input
-                      type="text"
-                      name="nombres"
-                      required
-                      placeholder="Ej. Lucía Paredes"
-                      value={ownerData.nombres}
-                      onChange={handleOwnerChange}
-                      style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255,255,255,0.15)', color: '#FFFFFF' }}
-                    />
-                  </div>
-
-                  <div className="form-group">
-                    <label style={{ color: '#E2E8F0', fontSize: '0.85rem', fontWeight: 600 }}>Teléfono WhatsApp de Contacto *</label>
-                    <input
-                      type="tel"
-                      name="telefono"
-                      required
-                      placeholder="Ej. 987 654 321"
-                      value={ownerData.telefono}
-                      onChange={handleOwnerChange}
-                      style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255,255,255,0.15)', color: '#FFFFFF' }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ marginTop: '0.8rem' }}>
-                  <label style={{ color: '#E2E8F0', fontSize: '0.85rem', fontWeight: 600 }}>Correo Electrónico</label>
-                  <input
-                    type="email"
-                    name="correo"
-                    placeholder="propietario@gmail.com"
-                    value={ownerData.correo}
-                    onChange={handleOwnerChange}
-                    style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.8)', border: '1px solid rgba(255,255,255,0.15)', color: '#FFFFFF' }}
-                  />
-                </div>
-              </div>
-
+              <p>Propietario: <strong>{user.nombres}</strong> · {user.correo}</p>
               {/* SECCIÓN 3: RECORDATORIOS POR CHATBOT WHATSAPP */}
               <div style={{
                 background: 'rgba(16, 185, 129, 0.08)',
@@ -711,7 +564,7 @@ export default function RegisterPet() {
                 </div>
 
                 <p style={{ color: '#CBD5E1', fontSize: '0.82rem', margin: '0 0 1rem', lineHeight: 1.45 }}>
-                  Gestionado mediante <strong>HuellasBot 🐾</strong>, nuestro asistente virtual automatizado. No requiere número personal real y protege la confidencialidad de tu familia.
+                  Si lo activas, se programará un aviso preventivo para el número registrado en tu cuenta.
                 </p>
 
                 {enableWhatsAppReminder && (
@@ -749,7 +602,7 @@ export default function RegisterPet() {
                       </div>
                     </div>
 
-                    <div>
+                    <div hidden={reminderType !== 'vacuna'}>
                       <label style={{ color: '#94A3B8', fontSize: '0.75rem', display: 'block', marginBottom: '0.3rem' }}>
                         Tratamiento o Vacuna (Específico para {petData.especie})
                       </label>
@@ -791,9 +644,10 @@ export default function RegisterPet() {
                 )}
               </div>
 
-              {/* BOTÓN FINAL DE REGISTRO */}
+              {error && <p role="alert">{error}</p>}
               <button
                 type="submit"
+                disabled={saving}
                 style={{
                   width: '100%',
                   display: 'flex',
@@ -833,17 +687,9 @@ export default function RegisterPet() {
                   Placa que llevará en su Collar
                 </h3>
                 <p style={{ color: '#94A3B8', fontSize: '0.8rem', margin: 0 }}>
-                  Código QR Real y Escaneable que puedes probar con tu cámara.
+                  El código QR se genera al guardar la mascota.
                 </p>
               </div>
-
-              <CollarQRTag
-                pet={{
-                  nombre: petData.nombre || 'Nombre de Mascota',
-                  codigoQR: generatedCode
-                }}
-                showActions={false}
-              />
 
               <div style={{
                 marginTop: '1.5rem',
@@ -871,10 +717,10 @@ export default function RegisterPet() {
         isOpen={isChatbotOpen}
         onClose={() => setIsChatbotOpen(false)}
         petName={petData.nombre || 'tu mascota'}
-        ownerName={ownerData.nombres || 'Estimado Propietario'}
+        ownerName={user.nombres}
         vaccineName={vaccineName}
         dueDate={`En ${reminderDays} días`}
-        petCode={generatedCode}
+        petCode={registeredPet?.codigoQR}
       />
 
       <Footer />

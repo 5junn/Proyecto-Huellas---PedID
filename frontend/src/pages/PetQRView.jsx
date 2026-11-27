@@ -35,35 +35,18 @@ const DEFAULT_PET_BASE = {
   alergias: 'Alergia severa a picaduras de pulgas. No administrar derivados de penicilina.',
 };
 
-function loadInitialPet(codigo) {
-  const upperCode = (codigo || 'HP-4092').toUpperCase();
-  try {
-    const stored = localStorage.getItem('huellas_mascotas');
-    if (stored) {
-      const list = JSON.parse(stored);
-      const match = list.find((m) =>
-        m.codigoQR?.toUpperCase() === upperCode ||
-        m.id?.toUpperCase() === upperCode
-      );
-      if (match) {
-        return {
-          ...DEFAULT_PET_BASE,
-          ...match,
-          codigo: match.codigoQR || match.codigo || upperCode,
-        };
-      }
-    }
-  } catch {
-    // Usar base demo
-  }
-  return { ...DEFAULT_PET_BASE, codigo: upperCode };
+export default function PetQRView() {
+  const { codigo } = useParams();
+  return <PetQRCard key={codigo} codigo={codigo} />;
 }
 
-export default function PetQRView() {
+function PetQRCard({ codigo }) {
   const navigate = useNavigate();
-  const { codigo = 'HP-4092' } = useParams();
-  const [pet, setPet] = useState(() => loadInitialPet(codigo));
-  const [isLost, setIsLost] = useState(() => Boolean(loadInitialPet(codigo).estadoExtravio));
+  const demo = codigo.toLowerCase() === 'demo';
+  const [pet, setPet] = useState(demo ? { ...DEFAULT_PET_BASE, codigo: 'demo', telefono: null } : null);
+  const [loadError, setLoadError] = useState('');
+  const [gpsError, setGpsError] = useState('');
+  const isLost = Boolean(pet?.estadoExtravio);
   const [gpsSent, setGpsSent] = useState(false);
   const [gpsSending, setGpsSending] = useState(false);
   const [gpsSentData, setGpsSentData] = useState(null);
@@ -76,33 +59,23 @@ export default function PetQRView() {
   const [emergencyQuestion, setEmergencyQuestion] = useState('');
   const [emergencyLoading, setEmergencyLoading] = useState(false);
 
-  // Cargar ficha real desde MySQL (si el backend está disponible)
   useEffect(() => {
-    let active = true;
-    apiFetch(`/mascotas/${encodeURIComponent(codigo)}`)
-      .then((dbPet) => {
-        if (!active || !dbPet) return;
-        setPet((prev) => ({
-          ...prev,
-          ...dbPet,
-          codigo: dbPet.codigo || dbPet.codigoQR || codigo.toUpperCase(),
-        }));
-        setIsLost(Boolean(dbPet.estadoExtravio));
-      })
-      .catch(() => {
-        // Fallback silencioso a datos locales/demo
+    if (demo) return;
+    const controller = new AbortController();
+    apiFetch(`/mascotas/${encodeURIComponent(codigo)}`, { authenticated: false, signal: controller.signal })
+      .then(setPet)
+      .catch((error) => {
+        if (error.name !== 'AbortError') setLoadError(error.status === 404 ? 'Placa QR no encontrada.' : error.message);
       });
-
-    return () => {
-      active = false;
-    };
-  }, [codigo]);
+    return () => controller.abort();
+  }, [codigo, demo]);
 
   // Actualizar guía del Asistente de Emergencia IA al cambiar modo o mascota
   useEffect(() => {
+    if (!pet) return;
     let active = true;
     askEmergencyAssistantAI({
-      codigo_qr: pet.codigo,
+      codigo_qr: demo ? undefined : pet.codigo,
       petName: pet.nombre,
       especie: pet.especie,
       raza: pet.raza,
@@ -144,7 +117,7 @@ export default function PetQRView() {
     return () => {
       active = false;
     };
-  }, [pet.codigo, pet.nombre, pet.especie, pet.raza, pet.alergias, pet.telClinica, isLost]);
+  }, [pet, isLost, demo]);
 
   const handleAskEmergencyAI = async (e, customQ = null) => {
     if (e) e.preventDefault();
@@ -153,7 +126,7 @@ export default function PetQRView() {
     setEmergencyLoading(true);
     try {
       const res = await askEmergencyAssistantAI({
-        codigo_qr: pet.codigo,
+        codigo_qr: demo ? undefined : pet.codigo,
         petName: pet.nombre,
         especie: pet.especie,
         raza: pet.raza,
@@ -171,74 +144,51 @@ export default function PetQRView() {
   };
 
   const handleSendLocation = () => {
-    setGpsSending(true);
-
-    const dispatchAlert = async (latitude, longitude, accuracyMeters = 15) => {
-      const alerta = {
-        id: 'GPS-' + Date.now(),
-        codigoMascota: pet.codigo || codigo,
-        nombreMascota: pet.nombre,
-        especie: pet.especie || 'Canino',
-        raza: pet.raza || 'Beagle',
-        propietario: pet.propietario,
-        telefono: pet.telefono || '+51 987 654 321',
-        lat: parseFloat(latitude.toFixed(6)),
-        lng: parseFloat(longitude.toFixed(6)),
-        precision: Math.round(accuracyMeters) + ' metros',
-        mapsUrl: `https://www.google.com/maps?q=${latitude.toFixed(6)},${longitude.toFixed(6)}`,
-        fecha: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        fechaCompleta: new Date().toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-        estado: 'activa',
-        leido: false
-      };
-
-      // Guardar alerta en MySQL + disparar notificación automática al teléfono registrado
-      try {
-        await apiFetch(`/mascotas/${encodeURIComponent(pet.codigo || codigo)}/alerta-gps`, {
-          method: 'POST',
-          body: JSON.stringify({
-            lat: alerta.lat,
-            lng: alerta.lng,
-            precision_metros: Math.round(accuracyMeters),
-            mensaje: `Escaneo QR de rescate para ${pet.nombre}`
-          })
-        });
-      } catch {
-        // Continuar con respaldo local
-      }
-
-      try {
-        const stored = JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
-        stored.unshift(alerta);
-        localStorage.setItem('huellas_alertas_gps', JSON.stringify(stored));
-      } catch (e) {
-        console.error('Error guardando alerta GPS:', e);
-      }
-
-      window.dispatchEvent(new CustomEvent('huellas_alerta_gps_recibida', { detail: alerta }));
-      window.dispatchEvent(new Event('storage'));
-
-      setGpsSentData(alerta);
-      setGpsSent(true);
-      setGpsSending(false);
-      setGpsModalOpen(true);
-    };
-
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          dispatchAlert(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
-        },
-        (err) => {
-          console.warn('Geolocation no disponible, usando coordenadas de contingencia en Lima:', err);
-          dispatchAlert(-12.1215, -77.0305, 12);
-        },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-      );
-    } else {
-      dispatchAlert(-12.1215, -77.0305, 15);
+    if (!isLost || demo || gpsSending) return;
+    setGpsError('');
+    if (!navigator.geolocation) {
+      setGpsError('Tu navegador no permite compartir la ubicación.');
+      return;
     }
+
+    setGpsSending(true);
+    navigator.geolocation.getCurrentPosition(async ({ coords }) => {
+      try {
+        const saved = await apiFetch(`/mascotas/${encodeURIComponent(pet.codigo)}/alerta-gps`, {
+          authenticated: false,
+          method: 'POST',
+          body: JSON.stringify({ lat: coords.latitude, lng: coords.longitude, precision_metros: Math.round(coords.accuracy) }),
+        });
+        setGpsSentData({
+          nombreMascota: pet.nombre,
+          lat: coords.latitude.toFixed(6),
+          lng: coords.longitude.toFixed(6),
+          precision: `${Math.round(coords.accuracy)} metros`,
+          mapsUrl: saved.mapsUrl,
+          notified: saved.notificacion_enviada,
+        });
+        setGpsSent(true);
+        setGpsModalOpen(true);
+        window.dispatchEvent(new Event('huellas_alerta_gps_recibida'));
+      } catch (error) {
+        setGpsError(error.message);
+      } finally {
+        setGpsSending(false);
+      }
+    }, () => {
+      setGpsError('No se pudo obtener tu ubicación. Comprueba los permisos de GPS e inténtalo de nuevo.');
+      setGpsSending(false);
+    }, { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
   };
+
+  if (!pet) {
+    return (
+      <main className="hp-landing-page">
+        {loadError ? <p role="alert">{loadError}</p> : <p role="status">Buscando placa QR…</p>}
+        <Link to="/">Volver al inicio</Link>
+      </main>
+    );
+  }
 
   return (
     <div className="hp-landing-page" style={{ minHeight: '100vh', justifyContent: 'flex-start', alignItems: 'center', padding: '1rem 0.5rem' }}>
@@ -301,9 +251,8 @@ export default function PetQRView() {
           border: '1px solid rgba(255, 255, 255, 0.1)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ color: '#CBD5E1', fontWeight: 600 }}>Estado de Placa QR:</span>
-            <button
-              onClick={() => setIsLost(!isLost)}
+            <span style={{ color: '#CBD5E1', fontWeight: 600 }}>{demo ? 'Placa de demostración' : 'Estado de placa QR'}</span>
+            <span
               style={{
                 padding: '0.4rem 0.9rem',
                 borderRadius: '999px',
@@ -312,12 +261,11 @@ export default function PetQRView() {
                 background: isLost ? '#EF4444' : '#10B981',
                 color: 'white',
                 border: 'none',
-                cursor: 'pointer',
                 boxShadow: isLost ? '0 0 15px rgba(239, 68, 68, 0.5)' : '0 0 15px rgba(16, 185, 129, 0.4)'
               }}
             >
               {isLost ? '¡Modo Mascota Perdida ACTIVO!' : 'Modo Habitual / Control'}
-            </button>
+            </span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.5rem' }}>
@@ -489,12 +437,13 @@ export default function PetQRView() {
                     {gpsSending
                       ? 'Obteniendo satélites GPS...'
                       : gpsSent
-                      ? '✓ ¡Ubicación GPS transmitida y notificada!'
+                      ? '✓ Ubicación guardada'
                       : 'Compartir mi Ubicación de Rescate (GPS)'}
                   </span>
                 </button>
               </div>
 
+              {gpsError && <p role="alert">{gpsError}</p>}
               {gpsModalOpen && gpsSentData && (
                 <div style={{
                   position: 'fixed',
@@ -529,7 +478,7 @@ export default function PetQRView() {
                       </button>
                     </div>
                     <p style={{ fontSize: '0.85rem', color: '#CBD5E1', lineHeight: 1.5, margin: '0 0 1rem 0' }}>
-                      Las coordenadas exactas para rescatar a <strong>{gpsSentData.nombreMascota}</strong> se guardaron en la base de datos y se envió alerta al dueño.
+                      Las coordenadas exactas para rescatar a <strong>{gpsSentData.nombreMascota}</strong> se guardaron. {gpsSentData.notified && 'Se envió la alerta al dueño.'}
                     </p>
                     <div style={{
                       background: 'rgba(15, 23, 42, 0.9)',
@@ -667,11 +616,11 @@ export default function PetQRView() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.84rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.35rem' }}>
                     <span style={{ color: '#94A3B8' }}>Dueño:</span>
-                    <strong style={{ color: '#FFFFFF' }}>{pet.propietario || 'Propietario Huellas'}</strong>
+                    <strong style={{ color: '#FFFFFF' }}>{pet.propietario || 'Protegido'}</strong>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span style={{ color: '#94A3B8' }}>Zona:</span>
-                    <strong style={{ color: '#FFFFFF' }}>{pet.distrito || 'Lima, Perú'}</strong>
+                    <strong style={{ color: '#FFFFFF' }}>{pet.distrito || 'Protegida'}</strong>
                   </div>
                 </div>
               </div>

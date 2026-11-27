@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const { CLINICAL_ROLES, RECEPTION_ROLES, requireSession, allowRoles } = require('../utils/session');
 const { sanitizeText } = require('../utils/security');
 const {
   generateSmartReminder,
@@ -14,7 +15,7 @@ const { dispatchMessage } = require('../services/messagingService');
  * 1. POST /api/ia/recordatorio-inteligente
  * Redacta con IA (y opcionalmente programa o envía) un recordatorio basado en el carnet y tabla Recordatorios.
  */
-router.post('/recordatorio-inteligente', async (req, res) => {
+router.post('/recordatorio-inteligente', requireSession, allowRoles(RECEPTION_ROLES), async (req, res) => {
   try {
     const body = req.body || {};
     let pet = null;
@@ -38,8 +39,8 @@ router.post('/recordatorio-inteligente', async (req, res) => {
 
     if (body.id_vacunacion) {
       const [vRows] = await db.queryAsync(
-        'SELECT * FROM carnet_vacunacion WHERE id_vacunacion = ? LIMIT 1',
-        [Number(body.id_vacunacion)]
+        'SELECT * FROM carnet_vacunacion WHERE id_vacunacion = ? AND id_mascota = ? LIMIT 1',
+        [Number(body.id_vacunacion), pet?.id_mascota || 0]
       );
       if (vRows.length > 0) vaccine = vRows[0];
     } else if (pet) {
@@ -108,7 +109,7 @@ router.post('/recordatorio-inteligente', async (req, res) => {
  * 2. POST /api/ia/resumen-clinico
  * Sintetiza alergias, consultas y tratamientos previos, generando un borrador editable para el veterinario.
  */
-router.post('/resumen-clinico', async (req, res) => {
+router.post('/resumen-clinico', requireSession, allowRoles(CLINICAL_ROLES), async (req, res) => {
   try {
     const body = req.body || {};
     const petName = sanitizeText(body.petName || body.pet || '', 80).toLowerCase();
@@ -120,17 +121,14 @@ router.post('/resumen-clinico', async (req, res) => {
       `SELECT m.*, COALESCE(r.nombre_raza, m.raza, 'Mestizo') AS raza_nombre
        FROM mascotas m
        LEFT JOIN razas r ON m.id_raza = r.id_raza
-       WHERE m.id_mascota = ? OR UPPER(m.codigo_qr) = ? OR LOWER(m.nombre) = ?
-       LIMIT 1`,
-      [idMascota, codigoQR, petName]
+       WHERE ${idMascota ? 'm.id_mascota' : codigoQR ? 'm.codigo_qr' : 'm.nombre'} = ?
+       LIMIT 2`,
+      [idMascota || codigoQR || petName]
     );
-
-    const pet = pets[0] || {
-      nombre: body.petName || body.pet || 'Paciente',
-      especie: body.especie || 'Canino',
-      raza: body.breed || 'Mestizo',
-      alergias: body.alergias || 'Sin alergias reportadas',
-    };
+    if (pets.length !== 1) {
+      return res.status(404).json({ error: 'Selecciona un paciente identificado de la base de datos.' });
+    }
+    const [pet] = pets;
 
     let consultations = [];
     let vaccines = [];
@@ -179,7 +177,7 @@ router.post('/resumen-clinico', async (req, res) => {
  * 3. GET /api/ia/alertas-predictivas
  * Detecta vacunas por vencer, falta de controles recientes y cambios de peso para gerencia.
  */
-router.get('/alertas-predictivas', async (req, res) => {
+router.get('/alertas-predictivas', requireSession, allowRoles(CLINICAL_ROLES), async (req, res) => {
   try {
     const [pets] = await db.queryAsync(
       `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono
@@ -237,12 +235,10 @@ router.post('/asistente-emergencia', async (req, res) => {
       if (rows.length > 0) pet = rows[0];
     }
 
-    // Respetar el estado real de la BD si existe, o el flag explícito del simulador
-    const isLost = pet
-      ? typeof body.isLost === 'boolean'
-        ? body.isLost
-        : Boolean(pet.modo_extraviado)
-      : Boolean(body.isLost);
+    if (codigoQR && !pet) {
+      return res.status(404).json({ error: 'Placa no encontrada.' });
+    }
+    const isLost = Boolean(pet?.modo_extraviado);
 
     const guidance = await generateEmergencyGuidance({
       pet: pet || {

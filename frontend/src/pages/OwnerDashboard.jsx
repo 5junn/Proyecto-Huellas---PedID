@@ -7,117 +7,22 @@ import Icon from '../components/Icon';
 import Logo from '../components/Logo';
 import CollarQRTag from '../components/CollarQRTag';
 import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
-import { getUser } from '../services/authService';
 import { apiFetch } from '../services/apiClient';
 import { getRazasPorEspecie } from '../data/razasData';
-import { getVacunaSugerida } from '../data/vacunasData';
 import '../styles/owner.css';
 
-const MASCOTAS_INICIALES = [
-  {
-    id: 'hp-4092',
-    nombre: 'Toby',
-    especie: 'Perro',
-    raza: 'Beagle',
-    edad: '3 años',
-    sexo: 'Macho',
-    peso: '12.4 kg',
-    color: 'Tricolor',
-    codigoQR: 'HP-4092',
-    estadoExtravio: false,
-    propietario: 'Lucía Paredes',
-    correo: 'propietario@gmail.com',
-    telefono: '987 654 321',
-    foto: 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80',
-    vacunas: [
-      { nombre: 'Antirrábica', fecha: '14 Oct 2026', proxima: '14 Oct 2027', estado: 'ok', vet: 'Dra. Ana Torres' },
-      { nombre: 'Sextuple Canina', fecha: '20 Ago 2026', proxima: '20 Ago 2027', estado: 'ok', vet: 'Dra. Ana Torres' },
-      { nombre: 'Desparasitación Interna', fecha: '02 Nov 2026', proxima: '02 Feb 2027', estado: 'ok', vet: 'Dr. Luis Vega' },
-    ],
-    alergias: 'Alergia a la pulga. No administrar derivados de penicilina.',
-  },
-  {
-    id: 'hp-8813',
-    nombre: 'Luna',
-    especie: 'Gato',
-    raza: 'Siamés',
-    edad: '1 año y medio',
-    sexo: 'Hembra',
-    peso: '3.8 kg',
-    color: 'Crema y chocolate',
-    codigoQR: 'HP-8813',
-    estadoExtravio: false,
-    propietario: 'Lucía Paredes',
-    correo: 'propietario@gmail.com',
-    telefono: '987 654 321',
-    foto: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80',
-    vacunas: [
-      { nombre: 'Triple Felina', fecha: '10 Sep 2026', proxima: '10 Sep 2027', estado: 'ok', vet: 'Dr. Luis Vega' },
-      { nombre: 'Leucemia Felina', fecha: '15 Jul 2026', proxima: '15 Jul 2027', estado: 'ok', vet: 'Dr. Luis Vega' },
-    ],
-    alergias: 'Ninguna conocida.',
-  }
-];
-
-function getAllPetsFromStorage() {
-  try {
-    const stored = localStorage.getItem('huellas_mascotas');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const existingIds = new Set(parsed.map((p) => p.codigoQR || p.id));
-        const leftovers = MASCOTAS_INICIALES.filter((m) => !existingIds.has(m.codigoQR) && !existingIds.has(m.id));
-        return [...parsed, ...leftovers];
-      }
-    }
-  } catch (err) {
-    console.error(err);
-  }
-  return MASCOTAS_INICIALES;
-}
-
-function filterPetsForUser(allPets, currentUser) {
-  if (!currentUser) return [];
-  const userEmail = (currentUser.correo || '').toLowerCase().trim();
-  const userName = (currentUser.nombres || '').toLowerCase().trim();
-  const isDemoLucia = userEmail === 'propietario@gmail.com' || userName.includes('lucía') || userName.includes('lucia');
-
-  return allPets.filter((pet) => {
-    const petEmail = (pet.correo || pet.ownerEmail || '').toLowerCase().trim();
-    const petOwner = (pet.propietario || '').toLowerCase().trim();
-
-    if (petEmail && userEmail && petEmail === userEmail) {
-      return true;
-    }
-    if (userName && petOwner && (petOwner === userName || petOwner.includes(userName) || userName.includes(petOwner))) {
-      return true;
-    }
-    if (isDemoLucia && (pet.codigoQR === 'HP-4092' || pet.codigoQR === 'HP-8813' || pet.id === 'hp-4092' || pet.id === 'hp-8813')) {
-      return true;
-    }
-    return false;
-  });
-}
-
-export default function OwnerDashboard() {
-  const [user] = useState(() => getUser() || { nombres: 'Lucía Paredes', correo: 'propietario@gmail.com', rol: 'Propietario', telefono: '976543210' });
-
-  // Cargar únicamente las mascotas pertenecientes a este perfil/cuenta
-  const [mascotas, setMascotas] = useState(() => filterPetsForUser(getAllPetsFromStorage(), user));
-
-  const [selectedPet, setSelectedPet] = useState(mascotas[0] || null);
+export default function OwnerDashboard({ user }) {
+  const [mascotas, setMascotas] = useState([]);
+  const [selectedPet, setSelectedPet] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [actionError, setActionError] = useState('');
+  const [savingPet, setSavingPet] = useState(false);
   const [modalCarnetOpen, setModalCarnetOpen] = useState(false);
   const [modalNewPetOpen, setModalNewPetOpen] = useState(false);
   const [alertSuccess, setAlertSuccess] = useState('');
 
-  // Estados para Alertas GPS de Rescate en tiempo real
-  const [gpsAlerts, setGpsAlerts] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [gpsAlerts, setGpsAlerts] = useState([]);
 
   // Estados para Modal de Vista QR & Collar
   const [modalQRViewOpen, setModalQRViewOpen] = useState(false);
@@ -152,118 +57,60 @@ export default function OwnerDashboard() {
     reader.readAsDataURL(file);
   };
 
-  // Sincronización en tiempo real con MySQL y almacenamiento local
+  const loadFromBackend = React.useCallback(async (signal) => {
+    const [pets, alerts] = await Promise.allSettled([
+      apiFetch('/mascotas', { signal }),
+      apiFetch('/mascotas/alertas-gps', { signal }),
+    ]);
+    if (signal?.aborted) return;
+    if (pets.status === 'fulfilled') setMascotas(pets.value);
+    if (alerts.status === 'fulfilled') setGpsAlerts(alerts.value);
+    setLoadError(pets.reason?.message || alerts.reason?.message || '');
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
-    let active = true;
-
-    const loadFromBackend = async () => {
-      try {
-        const qs = user?.correo ? `?correo=${encodeURIComponent(user.correo)}` : '';
-        const dbPets = await apiFetch(`/mascotas${qs}`);
-        if (active && Array.isArray(dbPets) && dbPets.length > 0) {
-          setMascotas(dbPets);
-        }
-      } catch {
-        // Backend offline: mantener caché local
-      }
-      try {
-        const dbGps = await apiFetch('/mascotas/alertas-gps');
-        if (active && Array.isArray(dbGps) && dbGps.length > 0) {
-          setGpsAlerts(dbGps);
-        }
-      } catch {
-        // Ignorar si backend offline
-      }
-    };
-    loadFromBackend();
-
-    const syncFromStorage = () => {
-      setMascotas(filterPetsForUser(getAllPetsFromStorage(), user));
-    };
-
-    window.addEventListener('storage', syncFromStorage);
-    window.addEventListener('huellas_mascotas_updated', syncFromStorage);
-
-    const syncGpsAlerts = () => {
-      try {
-        const stored = JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
-        setGpsAlerts(stored);
-      } catch (err) {
-        console.error('Error sincronizando alertas GPS:', err);
-      }
-    };
-    window.addEventListener('huellas_alerta_gps_recibida', syncGpsAlerts);
-    window.addEventListener('storage', syncGpsAlerts);
-
+    const controller = new AbortController();
+    const refresh = () => loadFromBackend(controller.signal);
+    refresh();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('huellas_alerta_gps_recibida', refresh);
     return () => {
-      active = false;
-      window.removeEventListener('storage', syncFromStorage);
-      window.removeEventListener('huellas_mascotas_updated', syncFromStorage);
-      window.removeEventListener('huellas_alerta_gps_recibida', syncGpsAlerts);
-      window.removeEventListener('storage', syncGpsAlerts);
+      controller.abort();
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('huellas_alerta_gps_recibida', refresh);
     };
-  }, [user]);
+  }, [loadFromBackend]);
 
   const handleResolveGpsAlert = async (alertId) => {
-    if (typeof alertId === 'number') {
-      apiFetch(`/mascotas/alertas-gps/${alertId}/resolver`, { method: 'PATCH' }).catch(() => {});
-    }
-    const updated = gpsAlerts.filter((a) => a.id !== alertId && a.id_alerta !== alertId);
-    setGpsAlerts(updated);
+    setActionError('');
     try {
-      localStorage.setItem('huellas_alertas_gps', JSON.stringify(updated));
-      window.dispatchEvent(new Event('storage'));
-    } catch (e) {
-      console.error(e);
+      await apiFetch(`/mascotas/alertas-gps/${alertId}/resolver`, { method: 'PATCH' });
+      setGpsAlerts((alerts) => alerts.filter((alert) => alert.id !== alertId));
+      setAlertSuccess('Alerta de rescate archivada.');
+      setTimeout(() => setAlertSuccess(''), 4500);
+    } catch (error) {
+      setActionError(error.message);
     }
-    setAlertSuccess('✓ Alerta de rescate GPS resuelta y archivada exitosamente.');
-    setTimeout(() => setAlertSuccess(''), 4500);
   };
 
   const toggleModoExtravio = async (petId) => {
-    const targetPet = mascotas.find((p) => p.id === petId || p.codigoQR === petId || p.id_mascota === petId);
-    let nuevoEstado = targetPet ? !targetPet.estadoExtravio : true;
-    const nombreMascota = targetPet?.nombre || '';
-
+    const pet = mascotas.find((entry) => entry.id === petId);
+    if (!pet) return;
+    setActionError('');
     try {
-      const apiRes = await apiFetch(`/mascotas/${encodeURIComponent(targetPet?.codigoQR || petId)}/extravio`, {
+      const { estadoExtravio } = await apiFetch(`/mascotas/${encodeURIComponent(pet.codigoQR)}/extravio`, {
         method: 'PATCH',
-        body: JSON.stringify({ estadoExtravio: nuevoEstado })
+        body: JSON.stringify({ estadoExtravio: !pet.estadoExtravio }),
       });
-      if (typeof apiRes?.estadoExtravio === 'boolean') {
-        nuevoEstado = apiRes.estadoExtravio;
-      }
-    } catch {
-      // Continuar con estado local
+      setMascotas((current) => current.map((entry) =>
+        entry.id === petId ? { ...entry, estadoExtravio } : entry
+      ));
+      setAlertSuccess(`Modo extravío ${estadoExtravio ? 'activado' : 'desactivado'} para ${pet.nombre}.`);
+      setTimeout(() => setAlertSuccess(''), 4500);
+    } catch (error) {
+      setActionError(error.message);
     }
-
-    const allStored = getAllPetsFromStorage();
-    const updatedGlobal = allStored.map((p) => {
-      if (p.id === petId || p.codigoQR === petId) {
-        return { ...p, estadoExtravio: nuevoEstado };
-      }
-      return p;
-    });
-
-    try {
-      localStorage.setItem('huellas_mascotas', JSON.stringify(updatedGlobal));
-      window.dispatchEvent(new Event('huellas_mascotas_updated'));
-      window.dispatchEvent(new Event('storage'));
-    } catch (e) {
-      console.error(e);
-    }
-
-    setMascotas((prev) =>
-      prev.map((p) =>
-        p.id === petId || p.codigoQR === petId ? { ...p, estadoExtravio: nuevoEstado } : p
-      )
-    );
-
-    const msg = nuevoEstado
-      ? `¡ALERTA ACTIVADA! ${nombreMascota} está ahora en Modo Mascota Perdida. Se notificó por WhatsApp y cualquier escaneo QR mostrará rescate.`
-      : `Modo Extravío desactivado para ${nombreMascota}. Todo seguro en Modo Habitual/Control.`;
-    setAlertSuccess(msg);
-    setTimeout(() => setAlertSuccess(''), 5000);
   };
 
   const handleOpenQRModal = (pet) => {
@@ -280,87 +127,26 @@ export default function OwnerDashboard() {
     setModalWhatsAppOpen(true);
   };
 
-  const handleCreatePet = async (e) => {
-    e.preventDefault();
-    if (!newPet.nombre.trim()) return;
-
-    const generatedQR = 'HP-' + Math.floor(1000 + Math.random() * 9000);
-    const suggestedVax = getVacunaSugerida(newPet.especie);
-    const nueva = {
-      id: generatedQR.toLowerCase(),
-      nombre: newPet.nombre,
-      especie: newPet.especie,
-      raza: newPet.raza || 'Beagle',
-      edad: newPet.edad || '1 año',
-      sexo: newPet.sexo,
-      peso: newPet.peso ? `${newPet.peso} kg` : 'N/A',
-      color: newPet.color || 'Varios',
-      codigoQR: generatedQR,
-      estadoExtravio: false,
-      propietario: user.nombres || 'Lucía Paredes',
-      correo: user.correo || 'propietario@gmail.com',
-      telefono: user.telefono || '976543210',
-      foto: newPet.foto || (newPet.especie === 'Gato'
-        ? 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80'
-        : 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80'),
-      vacunas: [
-        {
-          nombre: suggestedVax,
-          fecha: 'Hoy',
-          proxima: 'En 30 días',
-          estado: 'ok',
-          vet: (newPet.especie === 'Gato' || newPet.especie === 'Felino')
-            ? 'Dr. Luis Vega (Medicina Felina)'
-            : 'Dra. Ana Torres (Medicina General)'
-        }
-      ],
-      alergias: 'Por evaluar en consulta médica.',
-    };
-
+  const handleCreatePet = async (event) => {
+    event.preventDefault();
+    if (!newPet.nombre.trim() || savingPet) return;
+    setSavingPet(true);
+    setActionError('');
     try {
-      const dbRes = await apiFetch('/mascotas', {
+      const saved = await apiFetch('/mascotas', {
         method: 'POST',
-        body: JSON.stringify({
-          id_propietario: user.id_propietario || null,
-          codigo_qr: generatedQR,
-          nombre: nueva.nombre,
-          especie: nueva.especie,
-          raza: nueva.raza,
-          sexo: nueva.sexo,
-          edad: nueva.edad,
-          peso_actual: newPet.peso || null,
-          foto_url: nueva.foto,
-          alergias: nueva.alergias,
-          propietario_nombre: nueva.propietario,
-          propietario_telefono: nueva.telefono,
-          propietario_correo: nueva.correo,
-          vacuna_inicial: suggestedVax,
-          reminderDays: 30,
-          programar_recordatorio: true
-        })
+        body: JSON.stringify(newPet),
       });
-      if (dbRes?.id_mascota) {
-        nueva.id_mascota = dbRes.id_mascota;
-        nueva.id_propietario = dbRes.id_propietario;
-      }
-    } catch {
-      // Caché local si backend offline
+      setModalNewPetOpen(false);
+      setNewPet({ nombre: '', especie: 'Perro', raza: 'Beagle', edad: '', sexo: 'Macho', peso: '', color: '', foto: '' });
+      setAlertSuccess(`${newPet.nombre} se registró con la placa ${saved.codigo_qr}.`);
+      setTimeout(() => setAlertSuccess(''), 4500);
+      await loadFromBackend();
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setSavingPet(false);
     }
-
-    const allStored = getAllPetsFromStorage();
-    const updatedGlobal = [nueva, ...allStored];
-    try {
-      localStorage.setItem('huellas_mascotas', JSON.stringify(updatedGlobal));
-      window.dispatchEvent(new Event('huellas_mascotas_updated'));
-      window.dispatchEvent(new Event('storage'));
-    } catch {
-      // Ignorar error
-    }
-    setMascotas((prev) => [nueva, ...prev]);
-    setModalNewPetOpen(false);
-    setNewPet({ nombre: '', especie: 'Perro', raza: 'Beagle', edad: '', sexo: 'Macho', peso: '', color: '' });
-    setAlertSuccess(`¡${nueva.nombre} ha sido registrada en la base de datos y sincronizada con recepción!`);
-    setTimeout(() => setAlertSuccess(''), 4500);
   };
 
   return (
@@ -395,6 +181,9 @@ export default function OwnerDashboard() {
           </section>
 
           {/* ALERTA FLOTANTE DE ACCIÓN */}
+          {loading && <p role="status">Cargando tus mascotas…</p>}
+          {loadError && <p role="alert">{loadError} <button type="button" onClick={() => loadFromBackend()}>Reintentar</button></p>}
+          {actionError && !modalNewPetOpen && <p role="alert">{actionError}</p>}
           {alertSuccess && (
             <div className="hp-owner-alert animate-fade" role="status">
               <Icon name="shield" size={20} />
@@ -515,7 +304,7 @@ export default function OwnerDashboard() {
                       }}
                     >
                       <Icon name="check" size={16} />
-                      <span>Marcar Mascota como Localizada / Archivar Alerta</span>
+                      <span>Archivar alerta</span>
                     </button>
                   </div>
                 </div>
@@ -576,7 +365,7 @@ export default function OwnerDashboard() {
                     </div>
 
                     <p style={{ margin: 0, fontSize: '0.84rem', color: '#F3F4F6', lineHeight: 1.5 }}>
-                      La placa QR del collar de <strong>{lostPet.nombre}</strong> está transmitiendo la pantalla roja de auxilio con tus números telefónicos de contacto directo ({user.telefono || '987 654 321'}) para llamada inmediata de rescate.
+                      La placa QR del collar de <strong>{lostPet.nombre}</strong> está transmitiendo la pantalla roja de auxilio con tus números telefónicos de contacto directo ({user.telefono || 'sin teléfono registrado'}) para llamada inmediata de rescate.
                     </p>
 
                     {petGps && (
@@ -650,7 +439,7 @@ export default function OwnerDashboard() {
               </div>
             </div>
 
-            {mascotas.length === 0 ? (
+            {mascotas.length === 0 && !loading && !loadError ? (
               <div style={{
                 background: 'rgba(20, 28, 44, 0.65)',
                 border: '1px dashed rgba(255, 255, 255, 0.2)',
@@ -711,7 +500,7 @@ export default function OwnerDashboard() {
                 >
                   <div className="hp-pet-card-top">
                     <div className="hp-pet-media">
-                      <img src={pet.foto} alt={pet.nombre} className="hp-pet-photo" />
+                      {pet.foto ? <img src={pet.foto} alt={pet.nombre} className="hp-pet-photo" /> : <Icon name="paw" size={28} />}
                       {pet.estadoExtravio && (
                         <span className="hp-pet-lost-badge">
                           <Icon name="alert" size={12} />
@@ -744,11 +533,11 @@ export default function OwnerDashboard() {
                           <span>Carnet Clínico Huellas</span>
                         </span>
                         <span className="hp-vax-status ok">
-                          {pet.vacunas?.length || 0} vacunas vigentes
+                          {pet.vacunas?.length || 0} vacunas registradas
                         </span>
                       </div>
                       <p className="hp-vax-note">
-                        Última vacuna: {pet.vacunas?.[0]?.nombre} ({pet.vacunas?.[0]?.fecha})
+                        {pet.vacunas?.length ? `Última vacuna: ${pet.vacunas[0].nombre} (${pet.vacunas[0].fecha})` : 'Todavía no hay vacunas registradas.'}
                       </p>
 
                       {/* BOTÓN RÁPIDO PARA RECORDATORIO POR WHATSAPP */}
@@ -771,7 +560,7 @@ export default function OwnerDashboard() {
                         }}
                       >
                         <Icon name="whatsapp" size={14} />
-                        <span>Programar Recordatorio WhatsApp (API)</span>
+                        <span>Consultar por WhatsApp</span>
                       </button>
                     </div>
 
@@ -1098,7 +887,7 @@ export default function OwnerDashboard() {
                         💉 Vacunación Registrada:
                       </span>
                       <span style={{ color: '#10B981', fontSize: '0.72rem', fontWeight: 700 }}>
-                        {selectedQRPet.vacunas?.length || 0} Vacunas al día
+                        {selectedQRPet.vacunas?.length || 0} vacunas registradas
                       </span>
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
@@ -1214,7 +1003,7 @@ export default function OwnerDashboard() {
 
             <div className="hp-modal-body">
               <div className="hp-carnet-pet-summary">
-                <img src={selectedPet.foto} alt={selectedPet.nombre} className="hp-carnet-avatar" />
+                {selectedPet.foto ? <img src={selectedPet.foto} alt={selectedPet.nombre} className="hp-carnet-avatar" /> : <Icon name="paw" size={28} />}
                 <div>
                   <h4>{selectedPet.nombre} ({selectedPet.raza})</h4>
                   <p>Código de Trazabilidad: <strong>{selectedPet.codigoQR}</strong></p>
@@ -1316,6 +1105,7 @@ export default function OwnerDashboard() {
             </div>
 
             <form onSubmit={handleCreatePet} className="hp-modal-form">
+              {actionError && <p role="alert">{actionError}</p>}
               <div className="hp-form-grid-2">
                 <div className="form-group">
                   <label>Nombre de la Mascota *</label>
@@ -1447,7 +1237,7 @@ export default function OwnerDashboard() {
                 >
                   Cancelar
                 </button>
-                <button type="submit" className="hp-modal-btn primary">
+                <button type="submit" className="hp-modal-btn primary" disabled={savingPet}>
                   <Icon name="check" size={16} />
                   <span>Guardar y Generar Placa QR</span>
                 </button>

@@ -14,6 +14,7 @@ async function callExternalAIJson({ systemPrompt, userPrompt, temperature = 0.35
 
     const resp = await fetch(endpoint, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -38,6 +39,7 @@ async function callExternalAIJson({ systemPrompt, userPrompt, temperature = 0.35
     const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const resp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
+      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: `Bearer ${openaiKey}`,
         'Content-Type': 'application/json',
