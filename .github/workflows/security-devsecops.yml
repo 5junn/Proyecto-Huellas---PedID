@@ -70,15 +70,7 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: "20"
-
-      - name: Auditar vulnerabilidades con npm audit (High/Critical)
-        env:
-          PACKAGE_DIR: ${{ matrix.package }}
-        run: |
-          cd "$PACKAGE_DIR"
-          echo "## Auditoria SCA - ${PACKAGE_DIR}" >> "$GITHUB_STEP_SUMMARY"
-          npm audit --audit-level=high
+          node-version: "24"
 
       - name: Generar SBOM en formato CycloneDX
         env:
@@ -93,6 +85,14 @@ jobs:
           name: sbom-${{ matrix.package }}-cyclonedx
           path: ${{ matrix.package }}/sbom-${{ matrix.package }}.cdx.json
           retention-days: 14
+
+      - name: Auditar vulnerabilidades con npm audit (High/Critical)
+        env:
+          PACKAGE_DIR: ${{ matrix.package }}
+        run: |
+          cd "$PACKAGE_DIR"
+          echo "## Auditoria SCA - ${PACKAGE_DIR}" >> "$GITHUB_STEP_SUMMARY"
+          npm audit --audit-level=high
 
   dependency-review:
     name: Revision de Dependencias y Licencias (PR)
