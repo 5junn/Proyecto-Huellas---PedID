@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { rateLimit } = require('express-rate-limit');
 const os = require('os');
 require('dotenv').config();
 
@@ -13,7 +14,18 @@ const { RECEPTION_ROLES, requireSession, allowRoles } = require('./src/utils/ses
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+const proxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (Number.isInteger(proxyHops) && proxyHops > 0) app.set('trust proxy', proxyHops);
+
+const apiLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 240,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { message: 'Demasiadas solicitudes. Intenta de nuevo en un minuto.' },
+});
 app.use(cors());
+app.use(apiLimiter);
 app.use(express.json({ limit: '8mb' }));
 
 // Cabeceras básicas de seguridad HTTP

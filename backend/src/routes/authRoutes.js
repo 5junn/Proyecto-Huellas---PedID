@@ -1,4 +1,5 @@
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const router = express.Router();
 const db = require('../db');
 const {
@@ -20,6 +21,15 @@ function createSession(usuario) {
   return { success: true, token: signToken({ id: usuario.id, sessionVersion: 2 }), usuario };
 }
 
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 15,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { message: 'Demasiados intentos. Intenta de nuevo en unos minutos.' },
+});
+
 router.get('/me', requireSession, (req, res) => res.json({ usuario: req.user }));
 
 router.get('/health', (req, res) => {
@@ -30,7 +40,7 @@ router.get('/health', (req, res) => {
  * POST /api/auth/register
  * Registra un nuevo Propietario en `usuarios` y `propietarios`, y envía mensaje automático de bienvenida.
  */
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   try {
     const nombres = sanitizeText(req.body?.nombres, 120);
     const dni = sanitizeText(req.body?.dni, 20);
@@ -147,15 +157,12 @@ router.post('/register', async (req, res) => {
  * POST /api/auth/login
  * Autentica personal clínico o propietarios contra MySQL.
  */
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
     const password = req.body?.password;
     const portal = sanitizeText(req.body?.portal, 30);
 
-    if (!isValidEmail(correo) || typeof password !== 'string' || !password || password.length > 128) {
-      return res.status(400).json({ message: 'Ingresa un correo y una contraseña válidos.' });
-    }
     if (portal && !['staff', 'usuario'].includes(portal)) {
       return res.status(400).json({ message: 'Portal de acceso inválido.' });
     }
