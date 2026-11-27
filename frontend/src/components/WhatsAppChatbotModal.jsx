@@ -14,12 +14,12 @@ function generateBotReply(text, context) {
   if (mode === 'rescue') {
     // 1. Saludos en rescate
     if (/^(hola|buenas|buen d[ií]a|buenas tardes|buenas noches|hey|que tal|holis)/i.test(t)) {
-      return `¡Hola! 👋 Gracias por ponerte en contacto. Soy el *Asistente de Rescate Huellas* para *${petName}* (Placa: ${petCode}).\n\n¿Tienes a ${petName} contigo o conoces su ubicación? Escribe la dirección o punto de referencia para alertar de inmediato a su dueño *${ownerName}*.`;
+      return `¡Hola! 👋 Gracias por ponerte en contacto. Soy el *Asistente de Rescate Huellas* para *${petName}* (Placa: ${petCode}).\n\n¿Tienes a ${petName} contigo o conoces su ubicación? Usa el botón de ubicación de la ficha QR para alertar a su dueño.`;
     }
 
     // 2. Encontró / Tiene a la mascota / Ubicación
     if (/(tengo|encontr[eé]|est[aá] conmigo|lo vi|la vi|rescat|calle|parque|av|avenida|cuadra|surco|miraflores|san borja|lima|direcci[oó]n|punto|esquina)/i.test(t)) {
-      return `🚨 *¡Reporte de Rescate Registrado Exitosamente!* 🙏\n\nMuchas gracias por resguardar a *${petName}*. Hemos registrado tu mensaje: "${text}".\n\n📲 El propietario *${ownerName}* ha sido notificado para acudir a la zona. Por favor mantén a ${petName} con agua en un lugar seguro mientras se comunican contigo.`;
+      return `Gracias por ayudar a *${petName}*. Usa «Compartir mi ubicación» en la ficha QR o llama al teléfono de contacto para coordinar el rescate.`;
     }
 
     // 3. Teléfono / Llamar al dueño
@@ -54,17 +54,12 @@ function generateBotReply(text, context) {
 
   // 2. Agendar Cita / Horarios
   if (/(cita|agendar|separar|turno|hora|reserva|programar cita|sacar cita|consulta)/i.test(t)) {
-    return `📅 *Agendamiento de Citas Médicas - Clínica Huellas*\n\n¡Con mucho gusto! Podemos agendar la atención médica para *${petName}*.\n\n🩺 *Veterinarios de turno:*\n• Dra. Ana Torres (Medicina General & Cirugía)\n• Dr. Luis Vega (Vacunación & Medicina Felina)\n\n⏰ *Turnos disponibles sugeridos:*\n1️⃣ Hoy a las 4:30 PM\n2️⃣ Mañana a las 10:00 AM\n3️⃣ Mañana a las 3:30 PM\n\nResponde *1*, *2* o *3* para reservar tu turno, o escribe el horario que prefieras.`;
-  }
-
-  // 3. Confirmación de turno por número
-  if (/^(1|2|3|opci[oó]n 1|opci[oó]n 2|opci[oó]n 3)$/i.test(t)) {
-    return `✅ *¡Cita confirmada con éxito!*\n\n🐾 Paciente: *${petName}*\n👤 Propietario: *${ownerName}*\n🏥 Sede: Av. Primavera 1234, Surco\n🎟️ Código de Cita: *HUELLAS-${Math.floor(1000 + Math.random() * 9000)}*\n\nTe enviaremos una alerta de recordatorio 2 horas antes por este chat. ¡Los esperamos en la clínica!`;
+    return `Para solicitar una cita para *${petName}*, comunícate directamente con la clínica y confirma la disponibilidad.`;
   }
 
   // 4. Vacunas y Recordatorios
   if (/(vacuna|recordatorio|refuerzo|vence|antirr[aá]bica|s[eé]xtuple|triple|desparasit|dosis|alergia)/i.test(t)) {
-    return `💉 *Esquema Vacunal & Recordatorios de ${petName}:*\n\n• *Tratamiento actual:* ${vaccineName}\n• *Fecha programada / Refuerzo:* ${dueDate}\n• *Placa QR de control:* ${petCode}\n\n🔔 Nuestro sistema te notificará automáticamente *3 días antes* y el *mismo día* de la cita para que ${petName} mantenga su carnet al día. ¿Deseas confirmar la fecha o consultar otra vacuna?`;
+    return `Información de referencia para *${petName}*: ${vaccineName} · ${dueDate}. Consulta el carnet en tu cuenta y confirma la fecha con la clínica.`;
   }
 
   // 5. Mascota Perdida / Encontrada / Rescate
@@ -101,17 +96,16 @@ export default function WhatsAppChatbotModal({
   onClose,
   petName = 'tu mascota',
   ownerName = 'Propietario',
-  ownerPhone = '+51 987 654 321',
+  ownerPhone = '',
   petAllergies = '',
   mode = 'routine', // 'routine' | 'rescue'
   vaccineName = 'Vacuna Antirrábica y Sextuple',
   dueDate = 'En 30 días',
-  petCode = 'HP-4092'
+  petCode = 'sin placa asignada'
 }) {
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [userInput, setUserInput] = useState('');
-  const [reminderConfirmed, setReminderConfirmed] = useState(false);
   const chatEndRef = useRef(null);
 
   // Auto scroll al final de los mensajes
@@ -123,7 +117,6 @@ export default function WhatsAppChatbotModal({
     if (!isOpen) {
       setMessages([]);
       setIsTyping(false);
-      setReminderConfirmed(false);
       return;
     }
 
@@ -149,7 +142,7 @@ export default function WhatsAppChatbotModal({
             id: 2,
             sender: 'bot',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            text: `¿Has encontrado a *${petName}*? Por favor cuéntame si está contigo o escribe tu dirección/punto de encuentro para coordinar de inmediato con su dueño *${ownerName}* (Tel: ${ownerPhone}).`
+            text: `¿Encontraste a *${petName}*? Comparte tu ubicación desde su ficha QR o utiliza el teléfono de contacto cuando esté disponible.`
           }
         ]);
         setIsTyping(false);
@@ -167,7 +160,7 @@ export default function WhatsAppChatbotModal({
             id: 1,
             sender: 'bot',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            text: `¡Hola ${ownerName}! 🐾 Soy *HuellasBot*, el asistente virtual oficial de la *Clínica Veterinaria Huellas*.\n\nHe vinculado la ficha médica de *${petName}* (Placa QR: *${petCode}*).`
+            text: `¡Hola ${ownerName}! 🐾 Soy *HuellasBot*, el asistente virtual oficial de la *Clínica Veterinaria Huellas*.\n\nPuedo orientarte sobre *${petName}* (Placa: *${petCode}*).`
           }
         ]);
       }, 500);
@@ -179,7 +172,7 @@ export default function WhatsAppChatbotModal({
             id: 2,
             sender: 'bot',
             time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            text: `🔔 *Recordatorio Preventivo Programado:*\n💉 *Tratamiento:* ${vaccineName}\n📅 *Fecha Límite:* ${dueDate}\n\n¿Deseas confirmar la activación de esta alerta preventiva para recibirla por WhatsApp?`
+            text: `Referencia: *${vaccineName}* · *${dueDate}*. Para reservar una cita o confirmar una fecha, contacta a la clínica.`
           }
         ]);
         setIsTyping(false);
@@ -191,36 +184,6 @@ export default function WhatsAppChatbotModal({
       };
     }
   }, [isOpen, petName, ownerName, ownerPhone, petAllergies, mode, vaccineName, dueDate, petCode]);
-
-  const handleConfirmReminder = () => {
-    const userTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        sender: 'user',
-        time: userTime,
-        text: `Sí, por favor confirmar y programar el recordatorio para ${petName}.`
-      }
-    ]);
-
-    setIsTyping(true);
-    setReminderConfirmed(true);
-
-    setTimeout(() => {
-      const botTime = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          sender: 'bot',
-          time: botTime,
-          text: `✅ *¡Recordatorio Activado con Éxito!*\n\n📅 Fecha guardada: *${dueDate}*\n🩺 Tratamiento: *${vaccineName}*\n🐾 Paciente: *${petName}*\n\nTe notificaremos automáticamente por este canal *3 días antes* y el *día previo*. ¡Cuidamos a los que más quieres! 🐶🐱`
-        }
-      ]);
-      setIsTyping(false);
-    }, 900);
-  };
 
   const processUserMessage = (text) => {
     if (!text.trim()) return;
@@ -487,37 +450,8 @@ export default function WhatsAppChatbotModal({
             </div>
           )}
 
-          {/* BOTÓN RÁPIDO PARA CONFIRMAR RECORDATORIO INICIAL (SOLO EN MODO RUTINA) */}
-          {mode !== 'rescue' && !reminderConfirmed && messages.length >= 2 && !isTyping && (
-            <div style={{ alignSelf: 'center', margin: '0.3rem 0', width: '100%' }}>
-              <button
-                type="button"
-                onClick={handleConfirmReminder}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem 1rem',
-                  backgroundColor: '#00A884',
-                  color: '#111B21',
-                  border: 'none',
-                  borderRadius: '12px',
-                  fontWeight: 800,
-                  fontSize: '0.86rem',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.5rem',
-                  boxShadow: '0 4px 15px rgba(0, 168, 132, 0.4)'
-                }}
-              >
-                <Icon name="check" size={17} />
-                <span>Confirmar Programación de Recordatorio</span>
-              </button>
-            </div>
-          )}
-
           {/* BOTÓN RÁPIDO DE LLAMADA AL DUEÑO (EN MODO RESCATE) */}
-          {mode === 'rescue' && !isTyping && (
+          {mode === 'rescue' && ownerPhone && !isTyping && (
             <div style={{ alignSelf: 'center', margin: '0.2rem 0', width: '100%' }}>
               <a
                 href={`tel:${(ownerPhone || '987654321').replace(/\s+/g, '')}`}

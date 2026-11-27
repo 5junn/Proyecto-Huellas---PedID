@@ -1,35 +1,15 @@
 // src/pages/Dashboard.jsx
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { getUser, logout } from '../services/authService';
+import { logout } from '../services/authService';
 import Logo from '../components/Logo';
 import Icon from '../components/Icon';
-import { Spark, BarChart, Donut } from '../components/Charts';
+import { BarChart, Donut } from '../components/Charts';
 import { getRazasPorEspecie } from '../data/razasData';
 import { apiFetch } from '../services/apiClient';
 import {
-  fetchPredictiveAlertsAI,
-  generateClinicalSummaryAI,
-  generateSmartReminderAI,
-  sendAutoBatchMessages,
-  sendDirectMessageDB,
-  fetchRegisteredNumbersDB,
-  fetchRemindersDB,
-  fetchMessagingHistoryDB
+  fetchPredictiveAlertsAI, generateClinicalSummaryAI, sendDirectMessageDB, formatWhatsAppPhone,
 } from '../services/whatsappService';
-import {
-  KPIS,
-  WEEK,
-  MONTH,
-  SPECIES,
-  VACCINES,
-  ACTIVITY,
-  CONSULTS,
-  MASCOTAS_CLINICA,
-  PROPIETARIOS_CLINICA,
-  USUARIOS_STAFF,
-  RECORDATORIOS_CLINICA
-} from '../data/data';
 import '../styles/dashboard.css';
 import '../styles/staffDashboard.css';
 
@@ -70,46 +50,16 @@ const SECTIONS = {
 
 const STATUS_TEXT = { done: 'Atendida', progress: 'En curso', waiting: 'En espera' };
 
-const loadMergedMascotas = () => {
-  try {
-    const stored = localStorage.getItem('huellas_mascotas');
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const storedMapped = parsed.map((p, idx) => ({
-          id: p.id || `M-${200 + idx}`,
-          nombre: p.nombre,
-          especie: (p.especie?.toLowerCase().includes('fel') || p.especie?.toLowerCase().includes('gato')) ? 'Felino' : 'Canino',
-          raza: p.raza || 'Mestizo',
-          sexo: p.sexo || 'Macho',
-          edad: p.edad || '1 año',
-          peso: p.peso || '10 kg',
-          propietario: p.propietario || 'Propietario Huellas',
-          telefono: p.telefono || '987 654 321',
-          codigoQR: p.codigoQR || p.codigo || `HP-${Math.floor(1000 + Math.random() * 9000)}`,
-          estado: p.estadoExtravio ? 'Extraviado' : 'Activo',
-          chip: p.chip || ('981' + Math.floor(100000 + Math.random() * 900000)),
-          foto: p.foto,
-          alergias: p.alergias
-        }));
+const SPECIES_COLORS = ['#38BDF8', '#A78BFA', '#34D399', '#FBBF24', '#FB7185'];
+const dateKey = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Lima' });
 
-        const existingQrs = new Set(storedMapped.map((m) => m.codigoQR?.toUpperCase()));
-        const clinicLeftovers = MASCOTAS_CLINICA.filter((m) => !existingQrs.has(m.codigoQR?.toUpperCase()));
-        return [...storedMapped, ...clinicLeftovers];
-      }
-    }
-  } catch (err) {
-    console.error('Error cargando mascotas en Dashboard:', err);
-  }
-  return MASCOTAS_CLINICA;
-};
-
-export default function Dashboard() {
+export default function Dashboard({ user: currentUser }) {
   const navigate = useNavigate();
-  const initialUser = getUser() || { nombres: 'Dra. Ana Torres', rol: 'Veterinario', correo: 'veterinario@huellas.com' };
-  
-  // Estado del usuario activo (permite simular roles fácilmente para pruebas)
-  const [currentUser, setCurrentUser] = useState(initialUser);
+  const isVet = currentUser.rol === 'Veterinario';
+  const isRecep = currentUser.rol === 'Recepcionista';
+  const isAdmin = currentUser.rol === 'Administrador';
+  const clinical = isVet || isAdmin;
+  const reception = isRecep || isAdmin;
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const params = new URLSearchParams(window.location.search);
@@ -120,154 +70,64 @@ export default function Dashboard() {
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [chartRange, setChartRange] = useState('week');
+  const [today, setToday] = useState(() => dateKey.format(new Date()));
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  // Listas interactivas sincronizadas con MySQL + respaldo local
-  const [consultas, setConsultas] = useState(CONSULTS);
-  const [mascotas, setMascotas] = useState(loadMergedMascotas);
-  const [vacunas, setVacunas] = useState(VACCINES);
-  const [propietarios, setPropietarios] = useState(PROPIETARIOS_CLINICA);
-  const [recordatorios, setRecordatorios] = useState(RECORDATORIOS_CLINICA);
-  const [personal, setPersonal] = useState(USUARIOS_STAFF);
-  const [registeredNumbers, setRegisteredNumbers] = useState([]);
-  const [messagingHistory, setMessagingHistory] = useState([]);
-  const [predictiveAlerts, setPredictiveAlerts] = useState(null);
-  const [loadingAI, setLoadingAI] = useState(false);
+  const [consultas, setConsultas] = useState([]);
+  const [mascotas, setMascotas] = useState([]);
+  const [vacunas, setVacunas] = useState([]);
+  const [propietarios, setPropietarios] = useState([]);
+  const [recordatorios, setRecordatorios] = useState([]);
+  const [personal, setPersonal] = useState([]);
+  const [gpsAlerts, setGpsAlerts] = useState([]);
+  const [metrics, setMetrics] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [pending, setPending] = useState(true);
 
-  // Estados de modales
+  const [predictiveAlerts, setPredictiveAlerts] = useState(null);
+  const [clinicalSummary, setClinicalSummary] = useState(null);
+  const [loadingAI, setLoadingAI] = useState(false);
   const [modalConsultaOpen, setModalConsultaOpen] = useState(false);
   const [modalVacunaOpen, setModalVacunaOpen] = useState(false);
   const [modalStaffOpen, setModalStaffOpen] = useState(false);
   const [modalPetOpen, setModalPetOpen] = useState(false);
-  const [modalSmartReminderOpen, setModalSmartReminderOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [modalAlertasOpen, setModalAlertasOpen] = useState(false);
   const [isEditingAgenda, setIsEditingAgenda] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
-  // Estados para IA Clínica y Mensajería Automática
-  const [clinicalSummary, setClinicalSummary] = useState(null);
-  const [smartReminderForm, setSmartReminderForm] = useState({
-    petName: 'Toby',
-    canal: 'WhatsApp',
-    vaccineName: 'Refuerzo Vacunal',
-    dueDate: 'En 7 días',
-    asunto: '',
-    mensaje: '',
-    provider: ''
-  });
-  const [broadcastMessage, setBroadcastMessage] = useState(
-    '🐾 Hola {nombre}, te saludamos de Clínica Veterinaria Huellas. Recuerda revisar el carnet de vacunación y controles de {mascota} en Huellas PetID.'
-  );
-  const [broadcastChannel, setBroadcastChannel] = useState('WhatsApp');
-  const [sendingBatch, setSendingBatch] = useState(false);
+  const loadAllFromBackend = React.useCallback(async (signal) => {
+    const requests = [
+      ['/clinica/dashboard', setMetrics],
+      ['/mascotas', setMascotas],
+      ['/mascotas/alertas-gps', setGpsAlerts],
+    ];
+    if (clinical) requests.push(['/clinica/consultas', setConsultas], ['/clinica/vacunas', setVacunas]);
+    if (reception) requests.push(['/auth/propietarios', setPropietarios], ['/mensajeria/recordatorios', setRecordatorios]);
+    if (isAdmin) requests.push(['/auth/staff', setPersonal]);
 
-  // Sincronización en tiempo real de alertas GPS de rescate
-  const [gpsAlerts, setGpsAlerts] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
-    } catch {
-      return [];
-    }
-  });
+    const results = await Promise.allSettled(requests.map(([path]) => apiFetch(path, { signal })));
+    if (signal?.aborted) return;
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') requests[index][1](result.value);
+    });
+    setLoadError(results.find((result) => result.status === 'rejected')?.reason.message || '');
+    setToday(dateKey.format(new Date()));
+    setPending(false);
+  }, [clinical, reception, isAdmin]);
 
-  const loadAllFromBackend = React.useCallback(async () => {
-    try {
-      const [
-        dbMascotas,
-        dbConsultas,
-        dbVacunas,
-        dbPropietarios,
-        dbRecordatorios,
-        dbStaff,
-        dbGps,
-        dbNumbers,
-        dbHistory,
-        dbPredict
-      ] = await Promise.allSettled([
-        apiFetch('/mascotas'),
-        apiFetch('/clinica/consultas'),
-        apiFetch('/clinica/vacunas'),
-        apiFetch('/auth/propietarios'),
-        fetchRemindersDB(),
-        apiFetch('/auth/staff'),
-        apiFetch('/mascotas/alertas-gps'),
-        fetchRegisteredNumbersDB(),
-        fetchMessagingHistoryDB(),
-        fetchPredictiveAlertsAI()
-      ]);
-
-      if (dbMascotas.status === 'fulfilled' && Array.isArray(dbMascotas.value) && dbMascotas.value.length > 0) {
-        setMascotas(dbMascotas.value);
-      }
-      if (dbConsultas.status === 'fulfilled' && Array.isArray(dbConsultas.value) && dbConsultas.value.length > 0) {
-        setConsultas(dbConsultas.value);
-      }
-      if (dbVacunas.status === 'fulfilled' && Array.isArray(dbVacunas.value) && dbVacunas.value.length > 0) {
-        setVacunas(dbVacunas.value);
-      }
-      if (dbPropietarios.status === 'fulfilled' && Array.isArray(dbPropietarios.value) && dbPropietarios.value.length > 0) {
-        setPropietarios(dbPropietarios.value);
-      }
-      if (dbRecordatorios.status === 'fulfilled' && Array.isArray(dbRecordatorios.value) && dbRecordatorios.value.length > 0) {
-        setRecordatorios(dbRecordatorios.value);
-      }
-      if (dbStaff.status === 'fulfilled' && Array.isArray(dbStaff.value) && dbStaff.value.length > 0) {
-        setPersonal(dbStaff.value);
-      }
-      if (dbGps.status === 'fulfilled' && Array.isArray(dbGps.value) && dbGps.value.length > 0) {
-        setGpsAlerts(dbGps.value);
-      }
-      if (dbNumbers.status === 'fulfilled' && Array.isArray(dbNumbers.value?.numeros)) {
-        setRegisteredNumbers(dbNumbers.value.numeros);
-      }
-      if (dbHistory.status === 'fulfilled' && Array.isArray(dbHistory.value)) {
-        setMessagingHistory(dbHistory.value);
-      }
-      if (dbPredict.status === 'fulfilled' && dbPredict.value?.indicadores_preventivos) {
-        setPredictiveAlerts(dbPredict.value);
-      }
-    } catch {
-      // Respaldo silencioso cuando backend está offline
-    }
-  }, []);
-
-  const handleResolveGpsAlert = async (alertId) => {
-    if (typeof alertId === 'number') {
-      apiFetch(`/mascotas/alertas-gps/${alertId}/resolver`, { method: 'PATCH' }).catch(() => {});
-    }
-    const updated = gpsAlerts.filter((a) => a.id !== alertId && a.id_alerta !== alertId);
-    setGpsAlerts(updated);
-    try {
-      localStorage.setItem('huellas_alertas_gps', JSON.stringify(updated));
-      window.dispatchEvent(new Event('storage'));
-    } catch (e) {
-      console.error(e);
-    }
-    showToast('Alerta de rescate GPS archivada y marcada como atendida');
-  };
-
-  // Sincronización en tiempo real con MySQL y eventos de almacenamiento local
-  React.useEffect(() => {
-    loadAllFromBackend();
-
-    const handleSync = () => {
-      setMascotas(loadMergedMascotas());
-      try {
-        const storedGps = JSON.parse(localStorage.getItem('huellas_alertas_gps') || '[]');
-        if (storedGps.length > 0) setGpsAlerts(storedGps);
-      } catch (err) {
-        console.error(err);
-      }
-      loadAllFromBackend();
-    };
-    window.addEventListener('storage', handleSync);
-    window.addEventListener('huellas_mascotas_updated', handleSync);
-    window.addEventListener('huellas_alerta_gps_recibida', handleSync);
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => loadAllFromBackend(controller.signal);
+    refresh();
+    window.addEventListener('focus', refresh);
+    window.addEventListener('huellas_alerta_gps_recibida', refresh);
     return () => {
-      window.removeEventListener('storage', handleSync);
-      window.removeEventListener('huellas_mascotas_updated', handleSync);
-      window.removeEventListener('huellas_alerta_gps_recibida', handleSync);
+      controller.abort();
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('huellas_alerta_gps_recibida', refresh);
     };
   }, [loadAllFromBackend]);
 
@@ -276,44 +136,21 @@ export default function Dashboard() {
     nombre: '',
     especie: 'Canino',
     raza: 'Beagle',
-    propietario: '',
-    telefono: '987654321',
-    correo: '',
+    id_propietario: '',
     sexo: 'Macho',
-    edad: '1 año',
-    peso: '12',
+    edad: '',
+    peso: '',
     alergias: ''
   });
 
-  // Formularios
   const [formConsulta, setFormConsulta] = useState({
-    pet: '',
-    breed: '',
-    owner: '',
-    reason: '',
-    peso: '',
-    temperatura: '',
-    diagnostico: '',
-    tratamiento_receta: '',
-    vet: currentUser.nombres,
-    time: 'Ahora'
+    id_mascota: '', reason: '', diagnostico: '', tratamiento_receta: '', peso: '', temperatura: '',
   });
-
   const [formVacuna, setFormVacuna] = useState({
-    pet: '',
-    owner: '',
-    vaccine: 'Antirrábica Rabisin',
-    lote: 'LT-9941',
-    dias_refuerzo: '365',
-    vet: currentUser.nombres
+    id_mascota: '', vaccine: 'Antirrábica Rabisin', lote: '', dias_refuerzo: '365',
   });
-
   const [formStaff, setFormStaff] = useState({
-    nombres: '',
-    correo: '',
-    rol: 'Veterinario',
-    especialidad: '',
-    turno: 'Mañana (8:00 - 14:00)'
+    nombres: '', correo: '', rol: 'Veterinario', password: '', especialidad: '', turno: 'Mañana (8:00 - 14:00)',
   });
 
   // Filtrado de menú según rol
@@ -329,412 +166,118 @@ export default function Dashboard() {
   const allItems = allowedGroups.flatMap((g) => g.items);
   const currentNav = allItems.find((i) => i.id === activeTab) || allItems[0] || MENU[0].items[0];
 
-  const handleRoleChange = (e) => {
-    const newRole = e.target.value;
-    let newNombres = 'Dra. Ana Torres';
-    let newEmail = 'veterinario@huellas.com';
-    if (newRole === 'Recepcionista') {
-      newNombres = 'Carlos Mendoza';
-      newEmail = 'recepcion@huellas.com';
-    } else if (newRole === 'Administrador') {
-      newNombres = 'Administrador General';
-      newEmail = 'admin@huellas.com';
-    }
-    const updated = { ...currentUser, rol: newRole, nombres: newNombres, correo: newEmail };
-    setCurrentUser(updated);
-    setActiveTab('inicio');
-    setToastMessage(`Simulando vista para rol: ${newRole}`);
-    setTimeout(() => setToastMessage(''), 3000);
-  };
-
-  const showToast = (msg) => {
-    setToastMessage(msg);
+  const showToast = (message) => {
+    setToastMessage(message);
     setTimeout(() => setToastMessage(''), 4500);
   };
 
-  // IA 2: Generar resumen del historial clínico y borrador editable de diagnóstico
-  const handleGenerateClinicalDraft = async () => {
-    if (!formConsulta.pet.trim()) {
-      showToast('Escribe o selecciona primero el nombre del paciente.');
-      return;
-    }
-    setLoadingAI(true);
+  const handleResolveGpsAlert = async (id) => {
     try {
-      const matchedPet = mascotas.find(
-        (m) => m.nombre.toLowerCase() === formConsulta.pet.trim().toLowerCase()
-      );
-      const res = await generateClinicalSummaryAI({
-        id_mascota: matchedPet?.id_mascota || null,
-        codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
-        petName: formConsulta.pet,
-        especie: matchedPet?.especie || 'Canino',
-        breed: formConsulta.breed || matchedPet?.raza || 'Mestizo',
-        alergias: matchedPet?.alergias || '',
+      await apiFetch(`/mascotas/alertas-gps/${id}/resolver`, { method: 'PATCH' });
+      setGpsAlerts((current) => current.filter((alert) => alert.id !== id));
+      showToast('Alerta de rescate archivada.');
+    } catch (error) {
+      showToast(error.message);
+    }
+  };
+
+  const handleGenerateClinicalDraft = async () => {
+    if (!formConsulta.id_mascota || loadingAI) return;
+    setLoadingAI(true);
+    setFormError('');
+    try {
+      setClinicalSummary(await generateClinicalSummaryAI({
+        id_mascota: Number(formConsulta.id_mascota),
         motivo_consulta: formConsulta.reason,
-      });
-      setClinicalSummary(res);
-      setFormConsulta((prev) => ({
-        ...prev,
-        breed: prev.breed || matchedPet?.raza || '',
-        owner: prev.owner || matchedPet?.propietario || '',
-        diagnostico: res.borrador_diagnostico || prev.diagnostico,
-        tratamiento_receta: res.indicaciones_sugeridas || prev.tratamiento_receta,
       }));
-      showToast(`Borrador clínico generado con ${res.provider}`);
-    } catch (err) {
-      showToast(`Error generando resumen IA: ${err.message}`);
+    } catch (error) {
+      setFormError(error.message);
     } finally {
       setLoadingAI(false);
     }
   };
 
-  const handleCreateConsulta = async (e) => {
-    e.preventDefault();
-    if (!formConsulta.pet || !formConsulta.reason) return;
-
-    const matchedPet = mascotas.find(
-      (m) => m.nombre.toLowerCase() === formConsulta.pet.trim().toLowerCase()
-    );
-
-    let savedRecord = null;
+  const handlePredictiveAlerts = async () => {
+    setLoadingAI(true);
     try {
-      savedRecord = await apiFetch('/clinica/consultas', {
-        method: 'POST',
-        body: JSON.stringify({
-          id_mascota: matchedPet?.id_mascota || null,
-          codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
-          pet: formConsulta.pet,
-          reason: formConsulta.reason,
-          peso: formConsulta.peso || null,
-          temperatura: formConsulta.temperatura || null,
-          diagnostico: formConsulta.diagnostico || 'Atención en curso en consultorio.',
-          tratamiento_receta: formConsulta.tratamiento_receta || '',
-          borrador_ia: clinicalSummary?.borrador_diagnostico || '',
-          vet: currentUser.nombres,
-          status: 'progress'
-        })
-      });
-    } catch {
-      // Fallback local si backend offline o mascota solo local
+      setPredictiveAlerts(await fetchPredictiveAlertsAI());
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      setLoadingAI(false);
     }
-
-    const nueva = savedRecord || {
-      id: 'C-' + Math.floor(10 + Math.random() * 90),
-      pet: formConsulta.pet,
-      breed: formConsulta.breed || matchedPet?.raza || 'Mestizo',
-      owner: formConsulta.owner || matchedPet?.propietario || 'Propietario',
-      reason: formConsulta.reason,
-      vet: currentUser.nombres,
-      time: new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }),
-      status: 'progress',
-      diagnostico: formConsulta.diagnostico || 'Atención en curso en consultorio.'
-    };
-    setConsultas([nueva, ...consultas]);
-    setModalConsultaOpen(false);
-    setClinicalSummary(null);
-    setFormConsulta({
-      pet: '',
-      breed: '',
-      owner: '',
-      reason: '',
-      peso: '',
-      temperatura: '',
-      diagnostico: '',
-      tratamiento_receta: '',
-      vet: currentUser.nombres,
-      time: 'Ahora'
-    });
-    showToast(
-      savedRecord
-        ? `Consulta guardada en MySQL para ${nueva.pet}`
-        : `Consulta registrada para ${nueva.pet}`
-    );
-    loadAllFromBackend();
   };
 
-  const handleChangeConsultaStatus = async (id, newStatus) => {
+  const saveForm = async (event, path, input, onSaved) => {
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true);
+    setFormError('');
+    try {
+      const result = await apiFetch(path, { method: 'POST', body: JSON.stringify(input) });
+      onSaved(result);
+      await loadAllFromBackend();
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateConsulta = (event) => saveForm(event, '/clinica/consultas', {
+    ...formConsulta, borrador_ia: clinicalSummary?.borrador_diagnostico,
+  }, () => {
+    setModalConsultaOpen(false);
+    setClinicalSummary(null);
+    setFormConsulta({ id_mascota: '', reason: '', diagnostico: '', tratamiento_receta: '', peso: '', temperatura: '' });
+    showToast('Consulta guardada.');
+  });
+
+  const handleCreateVacuna = (event) => saveForm(event, '/clinica/vacunas', formVacuna, (saved) => {
+    setModalVacunaOpen(false);
+    setFormVacuna({ id_mascota: '', vaccine: formVacuna.vaccine, lote: '', dias_refuerzo: '365' });
+    showToast(saved.recordatorio_programado ? 'Vacuna registrada y recordatorio programado.' : 'Vacuna registrada.');
+  });
+
+  const handleCreatePetReception = (event) => saveForm(event, '/mascotas', formPet, (saved) => {
+    setModalPetOpen(false);
+    setFormPet({ nombre: '', especie: 'Canino', raza: 'Beagle', id_propietario: '', sexo: 'Macho', edad: '', peso: '', alergias: '' });
+    showToast(`Paciente registrado con placa ${saved.codigo_qr}.`);
+  });
+
+  const handleCreateStaff = (event) => saveForm(event, '/auth/staff', formStaff, (saved) => {
+    setModalStaffOpen(false);
+    setFormStaff({ nombres: '', correo: '', rol: 'Veterinario', password: '', especialidad: '', turno: 'Mañana (8:00 - 14:00)' });
+    showToast(`Cuenta creada para ${saved.nombres}.`);
+  });
+
+  const handleChangeConsultaStatus = async (id, status) => {
     try {
       await apiFetch(`/clinica/consultas/${encodeURIComponent(id)}/estado`, {
         method: 'PATCH',
-        body: JSON.stringify({ status: newStatus })
+        body: JSON.stringify({ status }),
       });
-    } catch {
-      // Fallback local
-    }
-
-    setConsultas((prev) =>
-      prev.map((c) => {
-        if ((c.id && c.id === id) || c.pet === id) {
-          return { ...c, status: newStatus };
-        }
-        return c;
-      })
-    );
-    showToast(`Estado actualizado: "${STATUS_TEXT[newStatus] || newStatus}"`);
-  };
-
-  const handleCreateVacuna = async (e) => {
-    e.preventDefault();
-    if (!formVacuna.pet) return;
-
-    const matchedPet = mascotas.find(
-      (m) => m.nombre.toLowerCase() === formVacuna.pet.trim().toLowerCase()
-    );
-
-    let savedVax = null;
-    try {
-      savedVax = await apiFetch('/clinica/vacunas', {
-        method: 'POST',
-        body: JSON.stringify({
-          id_mascota: matchedPet?.id_mascota || null,
-          codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
-          pet: formVacuna.pet,
-          vaccine: formVacuna.vaccine,
-          lote: formVacuna.lote,
-          dias_refuerzo: Number(formVacuna.dias_refuerzo) || 365,
-          vet: currentUser.nombres,
-          canal_recordatorio: 'WhatsApp'
-        })
-      });
-    } catch {
-      // Fallback local
-    }
-
-    const nueva = savedVax || {
-      id: 'V-' + Math.floor(100 + Math.random() * 900),
-      pet: formVacuna.pet,
-      owner: formVacuna.owner || matchedPet?.propietario || 'Propietario',
-      vaccine: formVacuna.vaccine,
-      lote: formVacuna.lote,
-      applied: 'Hoy',
-      expire: `En ${formVacuna.dias_refuerzo || 365} días`,
-      status: 'al-dia',
-      vet: currentUser.nombres
-    };
-    setVacunas([nueva, ...vacunas]);
-    setModalVacunaOpen(false);
-    showToast(
-      savedVax
-        ? `Dosis de ${nueva.vaccine} guardada en MySQL y recordatorio inteligente programado para ${nueva.pet}`
-        : `Dosis de ${nueva.vaccine} aplicada a ${nueva.pet}`
-    );
-    loadAllFromBackend();
-  };
-
-  const handleCreatePetReception = async (e) => {
-    e.preventDefault();
-    if (!formPet.nombre.trim()) return;
-
-    const newCode = 'HP-' + Math.floor(1000 + Math.random() * 9000);
-    const newPetRecord = {
-      id: newCode.toLowerCase(),
-      nombre: formPet.nombre,
-      especie: formPet.especie,
-      raza: formPet.raza || 'Mestizo',
-      sexo: formPet.sexo,
-      edad: formPet.edad || '1 año',
-      peso: formPet.peso ? `${formPet.peso} kg` : '10 kg',
-      propietario: formPet.propietario || 'Propietario Huellas',
-      telefono: formPet.telefono || '987654321',
-      correo: formPet.correo || '',
-      codigoQR: newCode,
-      estadoExtravio: false,
-      foto: formPet.especie === 'Felino'
-        ? 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80'
-        : 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80',
-      alergias: formPet.alergias.trim() || 'Sin alergias reportadas.',
-      vacunas: [
-        {
-          nombre: 'Control Inicial Clínico',
-          fecha: 'Hoy',
-          proxima: 'En 30 días',
-          estado: 'Vigente',
-          vet: currentUser.nombres || 'Dra. Ana Torres'
-        }
-      ]
-    };
-
-    try {
-      const dbRes = await apiFetch('/mascotas', {
-        method: 'POST',
-        body: JSON.stringify({
-          codigo_qr: newCode,
-          nombre: formPet.nombre,
-          especie: formPet.especie,
-          raza: formPet.raza || 'Mestizo',
-          sexo: formPet.sexo,
-          edad: formPet.edad || '1 año',
-          peso_actual: formPet.peso || null,
-          foto_url: newPetRecord.foto,
-          alergias: newPetRecord.alergias,
-          propietario_nombre: formPet.propietario || 'Propietario Huellas',
-          propietario_telefono: formPet.telefono || '987654321',
-          propietario_correo: formPet.correo || '',
-          vacuna_inicial: 'Control Inicial Clínico',
-          reminderDays: 30,
-          programar_recordatorio: true
-        })
-      });
-      if (dbRes?.id_mascota) {
-        newPetRecord.id_mascota = dbRes.id_mascota;
-        newPetRecord.id_propietario = dbRes.id_propietario;
-      }
-    } catch {
-      // Fallback local
-    }
-
-    try {
-      const stored = localStorage.getItem('huellas_mascotas');
-      const list = stored ? JSON.parse(stored) : [];
-      list.unshift(newPetRecord);
-      localStorage.setItem('huellas_mascotas', JSON.stringify(list));
-      window.dispatchEvent(new Event('huellas_mascotas_updated'));
-    } catch (err) {
-      console.error(err);
-    }
-
-    setMascotas((prev) => [newPetRecord, ...prev]);
-    setModalPetOpen(false);
-    setFormPet({
-      nombre: '',
-      especie: 'Canino',
-      raza: 'Beagle',
-      propietario: '',
-      telefono: '987654321',
-      correo: '',
-      sexo: 'Macho',
-      edad: '1 año',
-      peso: '12',
-      alergias: ''
-    });
-    showToast(`¡Paciente ${newPetRecord.nombre} guardado en MySQL con placa QR ${newCode}!`);
-    loadAllFromBackend();
-  };
-
-  const handleCreateStaff = async (e) => {
-    e.preventDefault();
-    if (!formStaff.nombres || !formStaff.correo) return;
-
-    let savedStaff = null;
-    try {
-      savedStaff = await apiFetch('/auth/staff', {
-        method: 'POST',
-        body: JSON.stringify(formStaff)
-      });
-    } catch (err) {
-      showToast(err.message);
-    }
-
-    const nuevo = savedStaff || {
-      id: 'U-' + Math.floor(10 + Math.random() * 90),
-      nombres: formStaff.nombres,
-      correo: formStaff.correo,
-      rol: formStaff.rol,
-      especialidad: formStaff.especialidad || 'Atención General',
-      turno: formStaff.turno,
-      estado: 'activo'
-    };
-    setPersonal([...personal, nuevo]);
-    setModalStaffOpen(false);
-    showToast(`Cuenta institucional creada en BD para ${nuevo.nombres}`);
-  };
-
-  // IA 1 & Mensajería Automática
-  const handleGenerateSmartReminderDraft = async () => {
-    setLoadingAI(true);
-    try {
-      const matchedPet = mascotas.find(
-        (m) => m.nombre.toLowerCase() === smartReminderForm.petName.trim().toLowerCase()
-      );
-      const res = await generateSmartReminderAI({
-        id_mascota: matchedPet?.id_mascota || null,
-        codigo_qr: matchedPet?.codigoQR || matchedPet?.codigo_qr || null,
-        petName: smartReminderForm.petName,
-        ownerName: matchedPet?.propietario || 'Propietario',
-        vaccineName: smartReminderForm.vaccineName,
-        dueDate: smartReminderForm.dueDate,
-        canal: smartReminderForm.canal
-      });
-      setSmartReminderForm((prev) => ({
-        ...prev,
-        asunto: res.asunto || prev.asunto,
-        mensaje: res.mensaje || prev.mensaje,
-        provider: res.provider || ''
-      }));
-    } catch (err) {
-      showToast(err.message);
-    } finally {
-      setLoadingAI(false);
+      setConsultas((current) => current.map((consulta) => consulta.id === id ? { ...consulta, status } : consulta));
+      showToast(`Estado actualizado: ${STATUS_TEXT[status]}.`);
+    } catch (error) {
+      showToast(error.message);
     }
   };
 
-  const handleSendSmartReminder = async (e, sendImmediately = true) => {
-    e.preventDefault();
-    const matchedPet = mascotas.find(
-      (m) => m.nombre.toLowerCase() === smartReminderForm.petName.trim().toLowerCase()
-    );
+  const handleResendReminder = async (reminder) => {
     try {
-      await sendDirectMessageDB({
-        id_mascota: matchedPet?.id_mascota || null,
-        id_propietario: matchedPet?.id_propietario || null,
-        canal: smartReminderForm.canal,
-        asunto: smartReminderForm.asunto || `Recordatorio ${smartReminderForm.vaccineName}`,
-        mensaje: smartReminderForm.mensaje,
-        telefono: matchedPet?.telefono || matchedPet?.propietario_telefono || '987654321',
-        correo: matchedPet?.correo || matchedPet?.propietario_correo || '',
-        generado_por_ia: true,
-        soloProgramar: !sendImmediately
-      });
-      setModalSmartReminderOpen(false);
-      showToast(
-        sendImmediately
-          ? `Mensaje inteligente enviado a ${matchedPet?.propietario || 'propietario'} y registrado en BD`
-          : `Recordatorio inteligente programado en la tabla Recordatorios`
-      );
-      loadAllFromBackend();
-    } catch (err) {
-      showToast(err.message);
-    }
-  };
-
-  const handleRunAutoBatch = async (modo = 'recordatorios') => {
-    setSendingBatch(true);
-    try {
-      const res = await sendAutoBatchMessages({
-        modo,
-        canal: broadcastChannel,
-        mensaje: broadcastMessage,
-        diasAnticipacion: 15,
-        soloVencidos: false
-      });
-      showToast(
-        modo === 'todos_numeros'
-          ? `Envío masivo completado: ${res.enviados}/${res.total_destinatarios} números notificados en la BD`
-          : `Envío automático ejecutado: ${res.generadosPorVacunas} generados, ${res.enviados} enviados`
-      );
-      loadAllFromBackend();
-    } catch (err) {
-      showToast(`No se pudo ejecutar envío automático: ${err.message}`);
-    } finally {
-      setSendingBatch(false);
-    }
-  };
-
-  const handleResendReminder = async (rec) => {
-    try {
-      if (rec.id_recordatorio) {
-        await sendDirectMessageDB({ id_recordatorio: rec.id_recordatorio });
-        loadAllFromBackend();
-      }
-      showToast(`Notificación enviada a ${rec.owner} (${rec.telefono || rec.canal})`);
-    } catch (err) {
-      showToast(err.message);
+      const result = await sendDirectMessageDB({ id_recordatorio: reminder.id_recordatorio });
+      showToast(result.external ? 'El proveedor aceptó el envío.' : 'El envío quedó registrado en el sistema.');
+      await loadAllFromBackend();
+    } catch (error) {
+      showToast(error.message);
+      await loadAllFromBackend();
     }
   };
 
   const salir = () => {
     logout();
-    navigate('/login');
+    navigate('/login?portal=staff', { replace: true });
   };
 
   const go = (id) => {
@@ -743,10 +286,40 @@ export default function Dashboard() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const chart = chartRange === 'week' ? WEEK : MONTH;
-  const isVet = currentUser.rol === 'Veterinario';
-  const isRecep = currentUser.rol === 'Recepcionista';
-  const isAdmin = currentUser.rol === 'Administrador';
+  const kpis = [
+    ['paw', 'sky', 'Mascotas registradas', metrics?.totales.mascotas],
+    ['clipboard', 'violet', 'Consultas registradas', metrics?.totales.consultas],
+    ['shield', 'amber', 'Vacunas por vencer', metrics?.totales.vacunasPorVencer],
+    ['users', 'green', 'Propietarios registrados', metrics?.totales.propietarios],
+  ];
+  const species = (metrics?.especies || []).map((entry, index) => ({
+    name: entry.especie,
+    value: (Number(entry.cantidad) / Number(metrics.totales.mascotas)) * 100,
+    color: SPECIES_COLORS[index % SPECIES_COLORS.length],
+  }));
+  const agenda = consultas.filter((entry) => entry.fecha_hora && dateKey.format(new Date(entry.fecha_hora)) === today);
+  const binDays = chartRange === 'week' ? 1 : 7;
+  const bins = chartRange === 'week' ? 7 : 8;
+  const labels = [];
+  const data = [];
+  const todayUTC = new Date(`${today}T00:00:00Z`).getTime();
+  for (let index = bins - 1; index >= 0; index--) {
+    const lastDay = todayUTC - index * binDays * 86400000;
+    const firstDay = lastDay - (binDays - 1) * 86400000;
+    const first = new Date(firstDay).toISOString().slice(0, 10);
+    const last = new Date(lastDay).toISOString().slice(0, 10);
+    labels.push(first.slice(5).split('-').reverse().join('/'));
+    data.push(consultas.filter((entry) => {
+      if (entry.status !== 'done' || !entry.fecha_hora) return false;
+      const day = dateKey.format(new Date(entry.fecha_hora));
+      return day >= first && day <= last;
+    }).length);
+  }
+  const patientOptions = mascotas.map((pet) => (
+    <option key={pet.id_mascota} value={pet.id_mascota}>
+      {pet.nombre} · {pet.codigoQR} · {pet.propietario}
+    </option>
+  ));
 
   return (
     <div className="app">
@@ -817,15 +390,7 @@ export default function Dashboard() {
             <strong>{currentNav.label}</strong>
           </div>
 
-          {/* SIMULADOR DE ROL EN TIEMPO REAL */}
-          <div className="role-badge-selector" title="Prueba rápida de perfiles de personal">
-            <span>Rol Clínico:</span>
-            <select value={currentUser.rol} onChange={handleRoleChange}>
-              <option value="Veterinario">Veterinario</option>
-              <option value="Recepcionista">Recepcionista</option>
-              <option value="Administrador">Administrador</option>
-            </select>
-          </div>
+          <div className="role-badge-selector">{currentUser.rol}</div>
 
           <label className="search">
             <Icon name="search" size={17} />
@@ -1036,6 +601,8 @@ export default function Dashboard() {
         )}
 
         <div className="page">
+          {pending && <p role="status">Cargando datos de la clínica…</p>}
+          {loadError && <p role="alert">{loadError} <button type="button" onClick={() => loadAllFromBackend()}>Reintentar</button></p>}
           {/* BANNER DINÁMICO DE ACCIÓN CLÍNICA SEGÚN ROL */}
           <section className="staff-action-banner">
             <div className="staff-action-info">
@@ -1053,11 +620,11 @@ export default function Dashboard() {
             <div className="staff-action-btns">
               {isVet && (
                 <>
-                  <button className="btn-staff-primary" onClick={() => setModalConsultaOpen(true)}>
+                  <button className="btn-staff-primary" onClick={() => { setFormError(''); setModalConsultaOpen(true); }}>
                     <Icon name="plus" size={16} />
                     <span>Nueva Consulta</span>
                   </button>
-                  <button className="btn-staff-secondary" onClick={() => setModalVacunaOpen(true)}>
+                  <button className="btn-staff-secondary" onClick={() => { setFormError(''); setModalVacunaOpen(true); }}>
                     <Icon name="syringe" size={16} />
                     <span>Aplicar Vacuna</span>
                   </button>
@@ -1066,20 +633,17 @@ export default function Dashboard() {
 
               {isRecep && (
                 <>
-                  <button className="btn-staff-primary" onClick={() => go('mascotas')}>
+                  <button className="btn-staff-primary" onClick={() => { setFormError(''); setModalPetOpen(true); }}>
                     <Icon name="paw" size={16} />
                     <span>Registrar Paciente QR</span>
                   </button>
-                  <button className="btn-staff-secondary" onClick={() => go('consultas')}>
-                    <Icon name="clipboard" size={16} />
-                    <span>Ingresar a Espera</span>
-                  </button>
+
                 </>
               )}
 
               {isAdmin && (
                 <>
-                  <button className="btn-staff-primary" onClick={() => setModalStaffOpen(true)}>
+                  <button className="btn-staff-primary" onClick={() => { setFormError(''); setModalStaffOpen(true); }}>
                     <Icon name="userCheck" size={16} />
                     <span>Crear Personal</span>
                   </button>
@@ -1177,17 +741,11 @@ export default function Dashboard() {
             <>
               {/* KPIS DE RENDIMIENTO CLÍNICO */}
               <section className="kpis">
-                {KPIS.map((k) => (
-                  <article className={`kpi tone-${k.tone}`} key={k.id}>
-                    <div className="kpi-top">
-                      <span className="tile"><Icon name={k.icon} size={22} /></span>
-                      <span className={`delta ${k.good ? 'good' : 'bad'}`}>{k.delta}</span>
-                    </div>
-                    <strong className="kpi-val">{k.value}</strong>
-                    <div className="kpi-foot">
-                      <span>{k.label}</span>
-                      <Spark data={k.trend} />
-                    </div>
+                {kpis.map(([icon, tone, label, value]) => (
+                  <article className={`kpi tone-${tone}`} key={label}>
+                    <span className="tile"><Icon name={icon} size={22} /></span>
+                    <strong className="kpi-val">{value ?? '—'}</strong>
+                    <div className="kpi-foot"><span>{label}</span></div>
                   </article>
                 ))}
               </section>
@@ -1199,7 +757,7 @@ export default function Dashboard() {
                     <section className="strip" role="status" key={lostPet.id || lostPet.codigoQR}>
                       <span className="strip-ico"><Icon name="alert" size={20} /></span>
                       <p>
-                        <strong>Modo Mascota Extraviada Activo.</strong> {lostPet.nombre} ({lostPet.raza || lostPet.especie} #{lostPet.codigoQR || lostPet.id}) fue reportado como extraviado. El sistema notificó automáticamente al propietario {lostPet.propietario} vía WhatsApp.
+                        <strong>Modo Mascota Extraviada Activo.</strong> {lostPet.nombre} ({lostPet.raza || lostPet.especie} #{lostPet.codigoQR || lostPet.id}) fue reportado como extraviado. Propietario: {lostPet.propietario}.
                       </p>
                       <Link to={`/pet/${lostPet.codigoQR || lostPet.id}`} className="btn btn-outline sm">
                         Ver Ficha QR
@@ -1209,9 +767,26 @@ export default function Dashboard() {
                 </>
               )}
 
+              {clinical && (
+                <article className="card">
+                  <header className="card-head">
+                    <h2>Alertas preventivas</h2>
+                    <button className="btn btn-outline sm" onClick={handlePredictiveAlerts} disabled={loadingAI}>
+                      {loadingAI ? 'Analizando…' : 'Analizar registros'}
+                    </button>
+                  </header>
+                  {predictiveAlerts && (
+                    <div className="row-text">
+                      <strong>{predictiveAlerts.resumen_gerencial}</strong>
+                      <span>Fuente: {predictiveAlerts.external ? predictiveAlerts.provider : 'Reglas clínicas locales'}</span>
+                    </div>
+                  )}
+                </article>
+              )}
+
               {/* GRÁFICOS */}
               <section className="grid-2-1">
-                <article className="card">
+                {clinical && <article className="card">
                   <header className="card-head">
                     <div>
                       <h2>Consultas Médicas Atendidas</h2>
@@ -1226,23 +801,23 @@ export default function Dashboard() {
                       </button>
                     </div>
                   </header>
-                  <BarChart key={chartRange} labels={chart.labels} data={chart.data} />
-                </article>
+                  <BarChart key={chartRange} labels={labels} data={data} />
+                </article>}
 
                 <article className="card">
                   <header className="card-head">
                     <div>
                       <h2>Distribución por Especie</h2>
-                      <p>1,284 pacientes activos</p>
+                      <p>{metrics?.totales.mascotas ?? '—'} mascotas registradas</p>
                     </div>
                   </header>
-                  <Donut parts={SPECIES} total="1,284" label="pacientes" />
+                  <Donut parts={species} total={metrics?.totales.mascotas ?? '—'} label="pacientes" />
                   <ul className="legend">
-                    {SPECIES.map((s) => (
+                    {species.map((s) => (
                       <li key={s.name}>
                         <i style={{ background: s.color }} />
                         {s.name}
-                        <strong>{s.value}%</strong>
+                        <strong>{Math.round(s.value)}%</strong>
                       </li>
                     ))}
                   </ul>
@@ -1250,7 +825,7 @@ export default function Dashboard() {
               </section>
 
               {/* ACTIVIDAD & VACUNAS POR VENCER */}
-              <section className="grid-2-1">
+              {clinical && <section className="grid-2-1">
                 <article className="card">
                   <header className="card-head">
                     <div>
@@ -1262,7 +837,7 @@ export default function Dashboard() {
                     </button>
                   </header>
                   <ul className="list">
-                    {vacunas.slice(0, 5).map((v) => (
+                    {vacunas.filter((vacuna) => vacuna.status === 'por-vencer').slice(0, 5).map((v) => (
                       <li className="row" key={v.id || v.pet}>
                         <span className="avatar" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34D399' }}>
                           <Icon name="syringe" size={16} />
@@ -1285,23 +860,23 @@ export default function Dashboard() {
                     </div>
                   </header>
                   <ul className="list">
-                    {ACTIVITY.map((a, idx) => (
-                      <li className="row activity" key={idx}>
+                    {consultas.slice(0, 5).map((a) => (
+                      <li className="row activity" key={a.id}>
                         <span className="tile sm" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#FBBF24' }}>
-                          <Icon name={a.icon} size={16} />
+                          <Icon name="clipboard" size={16} />
                         </span>
                         <div className="row-text">
-                          <strong>{a.text}</strong>
-                          <span>{a.by} · {a.time}</span>
+                          <strong>{a.pet} · {a.reason}</strong>
+                          <span>{a.vet} · {a.time}</span>
                         </div>
                       </li>
                     ))}
                   </ul>
                 </article>
-              </section>
+              </section>}
 
               {/* TABLA DE CITAS DEL DÍA */}
-              <article className="card">
+              {clinical && <article className="card">
                 <header className="card-head">
                   <div>
                     <h2>Agenda Médica de Hoy</h2>
@@ -1324,7 +899,7 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {consultas.map((c) => (
+                      {agenda.map((c) => (
                         <tr key={c.id || c.pet}>
                           <td>
                             <div className="cell-pet">
@@ -1466,7 +1041,7 @@ export default function Dashboard() {
                     </>
                   )}
                 </div>
-              </article>
+              </article>}
             </>
           )}
 
@@ -1505,9 +1080,9 @@ export default function Dashboard() {
                       Felinos
                     </button>
 
-                    <button
+                    {reception && <button
                       type="button"
-                      onClick={() => setModalPetOpen(true)}
+                      onClick={() => { setFormError(''); setModalPetOpen(true); }}
                       style={{
                         marginLeft: 'auto',
                         display: 'inline-flex',
@@ -1525,7 +1100,7 @@ export default function Dashboard() {
                     >
                       <Icon name="plus" size={14} />
                       <span>+ Registrar Paciente QR</span>
-                    </button>
+                    </button>}
                   </div>
                 </div>
               </div>
@@ -1550,7 +1125,7 @@ export default function Dashboard() {
                         const matchSearch =
                           m.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           m.codigoQR.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          m.propietario.toLowerCase().includes(searchTerm.toLowerCase());
+                          (m.propietario || '').toLowerCase().includes(searchTerm.toLowerCase());
                         const matchFilter = statusFilter === 'all' || m.especie === statusFilter;
                         return matchSearch && matchFilter;
                       })
@@ -1707,7 +1282,7 @@ export default function Dashboard() {
                     />
                   </div>
 
-                  <button className="btn-staff-primary" onClick={() => setModalVacunaOpen(true)}>
+                  <button className="btn-staff-primary" onClick={() => { setFormError(''); setModalVacunaOpen(true); }}>
                     <Icon name="syringe" size={16} />
                     <span>Aplicar Dosis</span>
                   </button>
@@ -1787,19 +1362,19 @@ export default function Dashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {PROPIETARIOS_CLINICA
+                    {propietarios
                       .filter((p) =>
                         p.nombres.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        p.dni.includes(searchTerm) ||
-                        p.telefono.includes(searchTerm)
+                        (p.dni || '').includes(searchTerm) ||
+                        (p.telefono || '').includes(searchTerm)
                       )
                       .map((p) => (
-                        <tr key={p.id}>
+                        <tr key={p.id_propietario}>
                           <td><strong style={{ color: '#FFFFFF' }}>{p.nombres}</strong></td>
                           <td><code>{p.dni}</code></td>
                           <td>
                             <a
-                              href={`https://wa.me/51${p.telefono.replace(/\s+/g, '')}`}
+                              href={`https://wa.me/${formatWhatsAppPhone(p.telefono)}`}
                               target="_blank"
                               rel="noreferrer"
                               style={{ color: '#34D399', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
@@ -1851,13 +1426,13 @@ export default function Dashboard() {
                       <th>Propietario</th>
                       <th>Canal de Envío</th>
                       <th>Asunto / Notificación</th>
-                      <th>Fecha Programada</th>
+                      <th>Fecha programada</th>
                       <th>Estado</th>
                       <th>Acción</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {RECORDATORIOS_CLINICA.map((r) => (
+                    {recordatorios.filter((r) => `${r.pet} ${r.owner}`.toLowerCase().includes(searchTerm.toLowerCase())).map((r) => (
                       <tr key={r.id}>
                         <td><code>{r.id}</code></td>
                         <td><strong style={{ color: '#FFFFFF' }}>{r.pet}</strong></td>
@@ -1878,7 +1453,7 @@ export default function Dashboard() {
                           <button
                             className="btn-staff-secondary"
                             style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}
-                            onClick={() => showToast(`Notificación reenviada a ${r.owner}`)}
+                            onClick={() => handleResendReminder(r)}
                           >
                             <Icon name="refresh" size={13} /> Reenviar
                           </button>
@@ -1906,7 +1481,7 @@ export default function Dashboard() {
                     />
                   </div>
 
-                  <button className="btn-staff-primary" onClick={() => setModalStaffOpen(true)}>
+                  <button className="btn-staff-primary" onClick={() => { setFormError(''); setModalStaffOpen(true); }}>
                     <Icon name="plus" size={16} />
                     <span>Crear Nuevo Usuario Staff</span>
                   </button>
@@ -1953,7 +1528,7 @@ export default function Dashboard() {
                           <td>{u.turno}</td>
                           <td>
                             <span className="mgmt-badge ok">
-                              <Icon name="check" size={12} /> Activo
+                              <Icon name="check" size={12} /> {u.estado}
                             </span>
                           </td>
                         </tr>
@@ -1977,44 +1552,19 @@ export default function Dashboard() {
               </button>
             </div>
             <form onSubmit={handleCreateConsulta}>
+              {formError && <p role="alert">{formError}</p>}
               <div className="staff-modal-body">
-                <div className="staff-modal-form-grid">
-                  <div>
-                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Nombre del Paciente *
-                    </label>
-                    <input
-                      className="staff-input-field"
-                      required
-                      placeholder="Ej. Toby, Max..."
-                      value={formConsulta.pet}
-                      onChange={(e) => setFormConsulta({ ...formConsulta, pet: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Raza / Especie
-                    </label>
-                    <input
-                      className="staff-input-field"
-                      placeholder="Ej. Beagle, Siamés..."
-                      value={formConsulta.breed}
-                      onChange={(e) => setFormConsulta({ ...formConsulta, breed: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                    Propietario Responsable
-                  </label>
-                  <input
-                    className="staff-input-field"
-                    placeholder="Ej. Jorge Salas"
-                    value={formConsulta.owner}
-                    onChange={(e) => setFormConsulta({ ...formConsulta, owner: e.target.value })}
-                  />
-                </div>
+                <label>
+                  Paciente *
+                  <select className="staff-input-field" required value={formConsulta.id_mascota}
+                    onChange={(event) => {
+                      setClinicalSummary(null);
+                      setFormConsulta({ ...formConsulta, id_mascota: event.target.value });
+                    }}>
+                    <option value="">Selecciona un paciente</option>
+                    {patientOptions}
+                  </select>
+                </label>
 
                 <div>
                   <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
@@ -2029,25 +1579,47 @@ export default function Dashboard() {
                   />
                 </div>
 
-                <div>
-                  <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                    Diagnóstico Clínico & Receta Médica
+                <div className="staff-modal-form-grid">
+                  <label>Peso (kg)
+                    <input className="staff-input-field" type="number" min="0.01" max="999.99" step="0.01"
+                      value={formConsulta.peso} onChange={(event) => setFormConsulta({ ...formConsulta, peso: event.target.value })} />
                   </label>
-                  <textarea
-                    className="staff-input-field"
-                    rows="3"
-                    placeholder="Observaciones de triaje, signos vitales y tratamiento prescrito..."
-                    value={formConsulta.diagnostico}
-                    onChange={(e) => setFormConsulta({ ...formConsulta, diagnostico: e.target.value })}
-                  />
+                  <label>Temperatura (°C)
+                    <input className="staff-input-field" type="number" min="0.01" max="99.99" step="0.01"
+                      value={formConsulta.temperatura} onChange={(event) => setFormConsulta({ ...formConsulta, temperatura: event.target.value })} />
+                  </label>
                 </div>
+                <button type="button" className="btn-staff-secondary"
+                  disabled={loadingAI || !formConsulta.id_mascota} onClick={handleGenerateClinicalDraft}>
+                  {loadingAI ? 'Generando…' : 'Generar borrador clínico'}
+                </button>
+                {clinicalSummary && (
+                  <div>
+                    <p>Revisa el borrador antes de incorporarlo a la consulta.</p>
+                    <p>{clinicalSummary.borrador_diagnostico}</p>
+                    <p>{clinicalSummary.indicaciones_sugeridas}</p>
+                    <button type="button" className="btn-staff-secondary" onClick={() => setFormConsulta({
+                      ...formConsulta,
+                      diagnostico: clinicalSummary.borrador_diagnostico,
+                      tratamiento_receta: clinicalSummary.indicaciones_sugeridas,
+                    })}>Copiar al formulario</button>
+                  </div>
+                )}
+                <label>Diagnóstico clínico
+                  <textarea className="staff-input-field" rows="3" value={formConsulta.diagnostico}
+                    onChange={(event) => setFormConsulta({ ...formConsulta, diagnostico: event.target.value })} />
+                </label>
+                <label>Tratamiento o receta
+                  <textarea className="staff-input-field" rows="3" value={formConsulta.tratamiento_receta}
+                    onChange={(event) => setFormConsulta({ ...formConsulta, tratamiento_receta: event.target.value })} />
+                </label>
               </div>
 
               <div className="staff-modal-footer">
                 <button type="button" className="btn-staff-secondary" onClick={() => setModalConsultaOpen(false)}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-staff-primary">
+                <button type="submit" className="btn-staff-primary" disabled={saving}>
                   <Icon name="check" size={16} /> Guardar Consulta
                 </button>
               </div>
@@ -2067,32 +1639,16 @@ export default function Dashboard() {
               </button>
             </div>
             <form onSubmit={handleCreateVacuna}>
+              {formError && <p role="alert">{formError}</p>}
               <div className="staff-modal-body">
-                <div className="staff-modal-form-grid">
-                  <div>
-                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Paciente *
-                    </label>
-                    <input
-                      className="staff-input-field"
-                      required
-                      placeholder="Nombre de la mascota"
-                      value={formVacuna.pet}
-                      onChange={(e) => setFormVacuna({ ...formVacuna, pet: e.target.value })}
-                    />
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Propietario
-                    </label>
-                    <input
-                      className="staff-input-field"
-                      placeholder="Nombre del dueño"
-                      value={formVacuna.owner}
-                      onChange={(e) => setFormVacuna({ ...formVacuna, owner: e.target.value })}
-                    />
-                  </div>
-                </div>
+                <label>
+                  Paciente *
+                  <select className="staff-input-field" required value={formVacuna.id_mascota}
+                    onChange={(event) => setFormVacuna({ ...formVacuna, id_mascota: event.target.value })}>
+                    <option value="">Selecciona un paciente</option>
+                    {patientOptions}
+                  </select>
+                </label>
 
                 <div className="staff-modal-form-grid">
                   <div>
@@ -2129,7 +1685,7 @@ export default function Dashboard() {
                 <button type="button" className="btn-staff-secondary" onClick={() => setModalVacunaOpen(false)}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-staff-primary">
+                <button type="submit" className="btn-staff-primary" disabled={saving}>
                   <Icon name="check" size={16} /> Registrar en Carnet Digital
                 </button>
               </div>
@@ -2149,6 +1705,7 @@ export default function Dashboard() {
               </button>
             </div>
             <form onSubmit={handleCreateStaff}>
+              {formError && <p role="alert">{formError}</p>}
               <div className="staff-modal-body">
                 <div>
                   <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
@@ -2216,13 +1773,18 @@ export default function Dashboard() {
                     />
                   </div>
                 </div>
+                <label>Contraseña inicial *
+                  <input className="staff-input-field" type="password" autoComplete="new-password" required
+                    minLength="12" maxLength="128" value={formStaff.password}
+                    onChange={(event) => setFormStaff({ ...formStaff, password: event.target.value })} />
+                </label>
               </div>
 
               <div className="staff-modal-footer">
                 <button type="button" className="btn-staff-secondary" onClick={() => setModalStaffOpen(false)}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-staff-primary">
+                <button type="submit" className="btn-staff-primary" disabled={saving}>
                   <Icon name="check" size={16} /> Emitir Credenciales
                 </button>
               </div>
@@ -2247,6 +1809,7 @@ export default function Dashboard() {
               </button>
             </div>
             <form onSubmit={handleCreatePetReception}>
+              {formError && <p role="alert">{formError}</p>}
               <div className="staff-modal-body">
                 <div className="staff-modal-form-grid">
                   <div>
@@ -2265,13 +1828,13 @@ export default function Dashboard() {
                     <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
                       Propietario Responsable *
                     </label>
-                    <input
-                      className="staff-input-field"
-                      required
-                      placeholder="Ej. Lucía Paredes"
-                      value={formPet.propietario}
-                      onChange={(e) => setFormPet({ ...formPet, propietario: e.target.value })}
-                    />
+                    <select className="staff-input-field" required value={formPet.id_propietario}
+                      onChange={(event) => setFormPet({ ...formPet, id_propietario: event.target.value })}>
+                      <option value="">Selecciona un propietario registrado</option>
+                      {propietarios.filter((owner) => owner.cuenta_estado === 'activo').map((owner) => (
+                        <option key={owner.id_propietario} value={owner.id_propietario}>{owner.nombres} · {owner.correo}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
 
@@ -2313,18 +1876,6 @@ export default function Dashboard() {
                 </div>
 
                 <div className="staff-modal-form-grid">
-                  <div>
-                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Teléfono de Contacto Propietario *
-                    </label>
-                    <input
-                      className="staff-input-field"
-                      required
-                      placeholder="Ej. 987 654 321"
-                      value={formPet.telefono}
-                      onChange={(e) => setFormPet({ ...formPet, telefono: e.target.value })}
-                    />
-                  </div>
                   <div>
                     <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
                       Sexo
@@ -2384,7 +1935,7 @@ export default function Dashboard() {
                 <button type="button" className="btn-staff-secondary" onClick={() => setModalPetOpen(false)}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-staff-primary">
+                <button type="submit" className="btn-staff-primary" disabled={saving}>
                   <Icon name="check" size={16} /> Registrar y Emitir Placa QR
                 </button>
               </div>

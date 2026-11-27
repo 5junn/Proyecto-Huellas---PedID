@@ -14,6 +14,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
   if (canal === 'Correo' && process.env.RESEND_API_KEY && toEmail) {
     const resp = await fetch('https://api.resend.com/emails', {
       method: 'POST',
+      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
         'Content-Type': 'application/json',
@@ -47,6 +48,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
     const url = `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
     const resp = await fetch(url, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000),
       headers: {
         Authorization: `Bearer ${process.env.WHATSAPP_CLOUD_TOKEN}`,
         'Content-Type': 'application/json',
@@ -90,6 +92,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
       const body = new URLSearchParams({ From: from, To: to, Body: text });
       const resp = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
         method: 'POST',
+      signal: AbortSignal.timeout(8000),
         headers: {
           Authorization: `Basic ${auth}`,
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -113,6 +116,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
   if (process.env.MESSAGING_WEBHOOK_URL) {
     const resp = await fetch(process.env.MESSAGING_WEBHOOK_URL, {
       method: 'POST',
+      signal: AbortSignal.timeout(8000),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         canal,
@@ -134,14 +138,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
     };
   }
 
-  // 5. Gateway Clínico Interno (persistencia real en BD + link directo WhatsApp)
-  const prefix = canal === 'Correo' ? 'MAIL' : canal === 'SMS' ? 'SMS' : 'WA';
-  return {
-    ok: true,
-    providerName: `Huellas ${canal} Gateway (Modo Integrado)`,
-    providerMessageId: `${prefix}-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
-    external: false,
-  };
+  throw new Error(`Configura un proveedor de mensajería para el canal ${canal}.`);
 }
 
 /**
@@ -205,7 +202,7 @@ async function dispatchMessage({
   soloProgramar = false,
 }) {
   const cleanPhone = normalizePhone(telefono);
-  const destinatario = canal === 'Correo' ? correo || cleanPhone : cleanPhone;
+  const destinatario = canal === 'Correo' ? correo : cleanPhone;
 
   if (!destinatario) {
     throw new Error('Se requiere un número telefónico o correo válido para enviar el mensaje.');
@@ -227,7 +224,7 @@ async function dispatchMessage({
         canal,
         sanitizeText(asunto, 150),
         mensaje,
-        cleanPhone || '987654321',
+        cleanPhone || '',
         correo || null,
         schedDate,
         generado_por_ia ? 1 : 0,

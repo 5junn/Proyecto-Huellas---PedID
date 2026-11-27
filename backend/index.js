@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const { rateLimit } = require('express-rate-limit');
 const os = require('os');
 require('dotenv').config();
 
@@ -8,11 +9,23 @@ const { initDatabase } = require('./src/dbInit');
 const { startScheduler } = require('./src/services/schedulerService');
 const { dispatchMessage } = require('./src/services/messagingService');
 const { sanitizeText } = require('./src/utils/security');
+const { RECEPTION_ROLES, requireSession, allowRoles } = require('./src/utils/session');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+const proxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+if (Number.isInteger(proxyHops) && proxyHops > 0) app.set('trust proxy', proxyHops);
+
+const apiLimiter = rateLimit({
+  windowMs: 60_000,
+  limit: 240,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { message: 'Demasiadas solicitudes. Intenta de nuevo en un minuto.' },
+});
 app.use(cors());
+app.use(apiLimiter);
 app.use(express.json({ limit: '8mb' }));
 
 // Cabeceras básicas de seguridad HTTP
@@ -65,7 +78,7 @@ app.get('/api/network-ip', (req, res) => {
 });
 
 // Endpoint compatible de Recordatorios por WhatsApp conectado a la BD y servicio de mensajería
-app.post('/api/reminders/whatsapp', async (req, res) => {
+app.post('/api/reminders/whatsapp', requireSession, allowRoles(RECEPTION_ROLES), async (req, res) => {
   try {
     const body = req.body || {};
     const recipient = sanitizeText(body.recipient || body.ownerPhone || '', 40);

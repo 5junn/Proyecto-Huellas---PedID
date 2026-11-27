@@ -1,4 +1,5 @@
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const router = express.Router();
 const db = require('../db');
 const {
@@ -11,7 +12,25 @@ const {
 } = require('../utils/security');
 const { sendWelcomeMessage } = require('../services/messagingService');
 
-const STAFF_ROLES = ['Administrador', 'Veterinario', 'Recepcionista'];
+const {
+  STAFF_ROLES, OWNER_ROLES, RECEPTION_ROLES,
+  findActiveUser, publicUser, requireSession, allowRoles,
+} = require('../utils/session');
+
+function createSession(usuario) {
+  return { success: true, token: signToken({ id: usuario.id, sessionVersion: 2 }), usuario };
+}
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 15,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { message: 'Demasiados intentos. Intenta de nuevo en unos minutos.' },
+});
+
+router.get('/me', requireSession, (req, res) => res.json({ usuario: req.user }));
 
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'auth-service' });
@@ -21,14 +40,14 @@ router.get('/health', (req, res) => {
  * POST /api/auth/register
  * Registra un nuevo Propietario en `usuarios` y `propietarios`, y envía mensaje automático de bienvenida.
  */
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
   try {
     const nombres = sanitizeText(req.body?.nombres, 120);
     const dni = sanitizeText(req.body?.dni, 20);
     const telefonoRaw = sanitizeText(req.body?.telefono, 30);
     const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
     const direccion = sanitizeText(req.body?.direccion || 'Lima, Perú', 255);
-    const password = String(req.body?.password || '');
+    const password = req.body?.password;
 
     if (!nombres || nombres.length < 3) {
       return res.status(400).json({ message: 'Ingresa tu nombre completo (mínimo 3 caracteres).' });
@@ -36,19 +55,18 @@ router.post('/register', async (req, res) => {
     if (!/^\d{8}$/.test(dni)) {
       return res.status(400).json({ message: 'El DNI debe tener exactamente 8 dígitos numéricos.' });
     }
-    const cleanDigits = telefonoRaw.replace(/\D/g, '');
-    if (cleanDigits.length < 9) {
-      return res.status(400).json({ message: 'Ingresa un número de teléfono válido (mínimo 9 dígitos).' });
+    const telefonoStored = normalizePhone(telefonoRaw);
+    if (!/^519\d{8}$/.test(telefonoStored)) {
+      return res.status(400).json({ message: 'Ingresa un número celular peruano válido.' });
     }
     if (!isValidEmail(correo)) {
       return res.status(400).json({ message: 'Ingresa un correo electrónico válido.' });
     }
-    if (password.length < 8) {
-      return res.status(400).json({ message: 'La contraseña debe tener mínimo 8 caracteres.' });
+    if (typeof password !== 'string' || password.length < 8 || password.length > 128 || password === 'password123') {
+      return res.status(400).json({ message: 'Elige una contraseña de 8 a 128 caracteres distinta de la clave de demostración.' });
     }
 
     const passwordHash = hashPassword(password);
-    const telefonoStored = normalizePhone(cleanDigits);
 
     const created = await db.withTransaction(async (conn) => {
       const [existingUser] = await conn.query(
@@ -109,18 +127,8 @@ router.post('/register', async (req, res) => {
       console.warn('[Auth Register] No se pudo enviar bienvenida automática:', msgErr.message);
     }
 
-    const token = signToken({
-      id: created.id_usuario,
-      id_propietario: created.id_propietario,
-      correo: created.correo,
-      rol: created.rol,
-    });
-
     return res.status(201).json({
-      success: true,
-      message: 'Cuenta de propietario registrada en la base de datos con éxito.',
-      token,
-      usuario: {
+      ...createSession({
         id: created.id_usuario,
         id_propietario: created.id_propietario,
         nombres: created.nombres,
@@ -128,13 +136,17 @@ router.post('/register', async (req, res) => {
         dni: created.dni,
         telefono: created.telefono,
         direccion: created.direccion,
-        rol: 'Propietario',
-      },
+        rol: created.rol,
+      }),
+      message: 'Cuenta de propietario registrada en la base de datos con éxito.',
       bienvenida_enviada: Boolean(welcomeStatus?.success),
     });
   } catch (err) {
     if (err.status) {
       return res.status(err.status).json({ message: err.message });
+    }
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ya existe una cuenta con este DNI o correo.' });
     }
     console.error('[Auth Register] Error:', err);
     return res.status(500).json({ message: 'Error interno al registrar propietario.' });
@@ -145,59 +157,31 @@ router.post('/register', async (req, res) => {
  * POST /api/auth/login
  * Autentica personal clínico o propietarios contra MySQL.
  */
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
   try {
     const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
-    const password = String(req.body?.password || '');
+    const password = req.body?.password;
     const portal = sanitizeText(req.body?.portal, 30);
 
-    if (!correo || !password) {
-      return res.status(400).json({ message: 'Ingresa correo y contraseña.' });
+    if (portal && !['staff', 'usuario'].includes(portal)) {
+      return res.status(400).json({ message: 'Portal de acceso inválido.' });
     }
 
-    const [rows] = await db.queryAsync(
-      `SELECT u.*, p.id_propietario, p.telefono AS prop_telefono, p.dni AS prop_dni, p.direccion AS prop_direccion
-       FROM usuarios u
-       LEFT JOIN propietarios p ON p.id_usuario = u.id_usuario OR p.correo = u.correo
-       WHERE LOWER(u.correo) = ? AND u.estado = 'activo'
-       LIMIT 1`,
-      [correo]
-    );
-
-    if (rows.length === 0) {
+    const userRow = await findActiveUser('correo', correo);
+    if (!userRow || !verifyPassword(password, userRow.contrasena_cifrada)) {
       return res.status(401).json({ message: 'Correo o contraseña incorrectos.' });
     }
 
-    const userRow = rows[0];
-    if (!verifyPassword(password, userRow.contrasena_cifrada)) {
-      return res.status(401).json({ message: 'Correo o contraseña incorrectos.' });
+    const usuario = publicUser(userRow);
+    const portalRoles = portal === 'staff' ? STAFF_ROLES : OWNER_ROLES;
+    if (!portalRoles.includes(usuario.rol)) {
+      return res.status(403).json({ message: 'Esta cuenta pertenece al otro portal de Huellas PetID.' });
+    }
+    if (OWNER_ROLES.includes(usuario.rol) && !usuario.id_propietario) {
+      return res.status(403).json({ message: 'Tu cuenta aún no está vinculada a un perfil de propietario.' });
     }
 
-    if (portal === 'staff' && !STAFF_ROLES.includes(userRow.rol)) {
-      return res.status(403).json({ message: 'Esta cuenta no tiene permisos de personal clínico.' });
-    }
-
-    const usuario = {
-      id: userRow.id_usuario,
-      id_propietario: userRow.id_propietario || null,
-      nombres: userRow.nombres,
-      correo: userRow.correo,
-      rol: userRow.rol,
-      dni: userRow.prop_dni || userRow.dni || '',
-      telefono: userRow.prop_telefono || userRow.telefono || '',
-      direccion: userRow.prop_direccion || userRow.direccion || '',
-      especialidad: userRow.especialidad || '',
-      turno: userRow.turno || '',
-    };
-
-    const token = signToken({
-      id: usuario.id,
-      id_propietario: usuario.id_propietario,
-      correo: usuario.correo,
-      rol: usuario.rol,
-    });
-
-    return res.json({ success: true, token, usuario });
+    return res.json(createSession(usuario));
   } catch (err) {
     console.error('[Auth Login] Error:', err);
     return res.status(500).json({ message: 'Error al iniciar sesión.' });
@@ -208,13 +192,14 @@ router.post('/login', async (req, res) => {
  * GET /api/auth/propietarios
  * Lista todos los propietarios registrados en la BD con sus mascotas asociadas.
  */
-router.get('/propietarios', async (req, res) => {
+router.get('/propietarios', requireSession, allowRoles(RECEPTION_ROLES), async (req, res) => {
   try {
     const [propietarios] = await db.queryAsync(
-      `SELECT p.*,
+      `SELECT p.*, owner.estado AS cuenta_estado,
         GROUP_CONCAT(CONCAT(m.nombre, ' (', COALESCE(m.raza, m.especie), ')') SEPARATOR ' | ') AS mascotas_texto,
         COUNT(m.id_mascota) AS total_mascotas
        FROM propietarios p
+       LEFT JOIN usuarios owner ON owner.id_usuario = p.id_usuario AND owner.rol = 'Propietario'
        LEFT JOIN mascotas m ON m.id_propietario = p.id_propietario
        GROUP BY p.id_propietario
        ORDER BY p.id_propietario DESC`
@@ -235,7 +220,7 @@ router.get('/propietarios', async (req, res) => {
  * GET /api/auth/staff
  * Lista personal clínico desde MySQL.
  */
-router.get('/staff', async (req, res) => {
+router.get('/staff', requireSession, allowRoles(['Administrador']), async (req, res) => {
   try {
     const [staff] = await db.queryAsync(
       `SELECT id_usuario AS id, nombres, correo, rol, especialidad, turno, estado, telefono
@@ -254,18 +239,23 @@ router.get('/staff', async (req, res) => {
  * POST /api/auth/staff
  * Crea una nueva cuenta de personal clínico en MySQL.
  */
-router.post('/staff', async (req, res) => {
+router.post('/staff', requireSession, allowRoles(['Administrador']), async (req, res) => {
   try {
     const nombres = sanitizeText(req.body?.nombres, 120);
     const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
-    const rol = STAFF_ROLES.includes(req.body?.rol) ? req.body.rol : 'Veterinario';
+    const rol = req.body?.rol;
     const especialidad = sanitizeText(req.body?.especialidad || 'Atención General', 100);
     const turno = sanitizeText(req.body?.turno || 'Mañana (8:00 - 14:00)', 60);
     const telefono = normalizePhone(req.body?.telefono || '');
-    const password = String(req.body?.password || 'password123');
+    const password = req.body?.password;
 
     if (!nombres || !isValidEmail(correo)) {
       return res.status(400).json({ message: 'Se requiere nombre completo y correo válido.' });
+    }
+
+    if (!STAFF_ROLES.includes(rol) || typeof password !== 'string' ||
+        password.length < 12 || password.length > 128 || password === 'password123') {
+      return res.status(400).json({ message: 'Selecciona un rol válido y una contraseña de 12 a 128 caracteres.' });
     }
 
     const passwordHash = hashPassword(password);
