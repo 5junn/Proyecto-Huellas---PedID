@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AuthLayout from '../components/AuthLayout';
 import PasswordInput from '../components/PasswordInput';
 import Icon from '../components/Icon';
-import { registrarUsuarioPropietario } from '../services/authService';
+import { registrarUsuarioPropietario, solicitarCodigoRegistro } from '../services/authService';
 
 export default function Register() {
   const navigate = useNavigate();
@@ -20,19 +20,38 @@ export default function Register() {
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [awaitingCode, setAwaitingCode] = useState(false);
+  const [codigo, setCodigo] = useState('');
+  const [notice, setNotice] = useState('');
 
   const handleChange = (e) => {
     setFormData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
     if (error) setError('');
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const sendCode = async (event) => {
+    event?.preventDefault();
+    setError('');
+    setNotice('');
+    setLoading(true);
+    try {
+      const result = await solicitarCodigoRegistro(formData.correo);
+      setNotice(result.message);
+      setCodigo('');
+      setAwaitingCode(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
-
     try {
-      await registrarUsuarioPropietario(formData);
+      await registrarUsuarioPropietario({ ...formData, codigo });
       navigate(['/registrar-mascota', '/registro-mascota'].includes(redirect) ? redirect : '/propietario', { replace: true });
     } catch (err) {
       setError(err.message);
@@ -51,8 +70,8 @@ export default function Register() {
           <Icon name="paw" size={15} />
           <span>Registro Exclusivo de Propietario</span>
         </div>
-        <h2>Crear Cuenta de Dueño</h2>
-        <p>Completa tus datos de contacto para registrar y proteger a tus mascotas.</p>
+        <h2>{awaitingCode ? 'Verifica tu correo' : 'Crear Cuenta de Dueño'}</h2>
+        <p>{awaitingCode ? formData.correo : 'Completa tus datos de contacto para registrar y proteger a tus mascotas.'}</p>
       </div>
 
       {error && (
@@ -62,133 +81,157 @@ export default function Register() {
         </div>
       )}
 
-      <form className="auth-form" onSubmit={handleSubmit}>
-        <div className="form-group">
-          <label htmlFor="nombres">Nombres y Apellidos Completos</label>
-          <div className="input-wrapper">
-            <span className="input-icon" aria-hidden="true">
-              <Icon name="user" size={18} />
-            </span>
-            <input
-              id="nombres"
-              name="nombres"
-              type="text"
-              className="form-input"
-              placeholder="Ej. Lucía Paredes Mendoza"
-              value={formData.nombres}
-              onChange={handleChange}
-              required
-            />
-          </div>
-        </div>
-
-        <div className="form-row-2">
+      {notice && <p role="status">{notice}</p>}
+      {awaitingCode ? (
+        <form className="auth-form" onSubmit={handleSubmit}>
           <div className="form-group">
-            <label htmlFor="dni">DNI / Documento</label>
+            <label htmlFor="codigo">Código de seis dígitos</label>
+            <input id="codigo" className="form-input" inputMode="numeric" autoComplete="one-time-code"
+              pattern="[0-9]{6}" maxLength={6} required value={codigo}
+              onChange={(event) => setCodigo(event.target.value.replace(/[^0-9]/g, ''))} />
+          </div>
+          <button type="submit" className="btn-primary-gradient" disabled={loading}>
+            {loading ? 'Verificando…' : 'Verificar y crear cuenta'}
+          </button>
+          <button type="button" className="portal-tab-btn" disabled={loading} onClick={() => sendCode()}>
+            Reenviar código
+          </button>
+          <button type="button" className="portal-tab-btn" disabled={loading} onClick={() => {
+            setAwaitingCode(false);
+            setCodigo('');
+            setError('');
+            setNotice('');
+          }}>Cambiar correo o datos</button>
+        </form>
+      ) : (
+        <form className="auth-form" onSubmit={sendCode}>
+          <div className="form-group">
+            <label htmlFor="nombres">Nombres y Apellidos Completos</label>
             <div className="input-wrapper">
               <span className="input-icon" aria-hidden="true">
-                <Icon name="idcard" size={18} />
+                <Icon name="user" size={18} />
               </span>
               <input
-                id="dni"
-                name="dni"
+                id="nombres"
+                name="nombres"
                 type="text"
-                maxLength="8"
                 className="form-input"
-                placeholder="8 dígitos"
-                value={formData.dni}
+                placeholder="Ej. Lucía Paredes Mendoza"
+                value={formData.nombres}
                 onChange={handleChange}
                 required
+              />
+            </div>
+          </div>
+
+          <div className="form-row-2">
+            <div className="form-group">
+              <label htmlFor="dni">DNI / Documento</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">
+                  <Icon name="idcard" size={18} />
+                </span>
+                <input
+                  id="dni"
+                  name="dni"
+                  type="text"
+                  maxLength="8"
+                  className="form-input"
+                  placeholder="8 dígitos"
+                  value={formData.dni}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="telefono">Teléfono Celular de Contacto</label>
+              <div className="input-wrapper">
+                <span className="input-icon" aria-hidden="true">
+                  <Icon name="phone" size={18} />
+                </span>
+                <input
+                  id="telefono"
+                  name="telefono"
+                  type="tel"
+                  maxLength="9"
+                  className="form-input"
+                  placeholder="999 999 999"
+                  value={formData.telefono}
+                  onChange={handleChange}
+                  required
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="correo">Correo Electrónico</label>
+            <div className="input-wrapper">
+              <span className="input-icon" aria-hidden="true">
+                <Icon name="mail" size={18} />
+              </span>
+              <input
+                id="correo"
+                name="correo"
+                type="email"
+                className="form-input"
+                placeholder="lucia@ejemplo.com"
+                value={formData.correo}
+                onChange={handleChange}
+                required
+                autoComplete="email"
               />
             </div>
           </div>
 
           <div className="form-group">
-            <label htmlFor="telefono">Teléfono Celular de Contacto</label>
+            <label htmlFor="direccion">Dirección de Residencia</label>
             <div className="input-wrapper">
               <span className="input-icon" aria-hidden="true">
-                <Icon name="phone" size={18} />
+                <Icon name="pin" size={18} />
               </span>
               <input
-                id="telefono"
-                name="telefono"
-                type="tel"
-                maxLength="9"
+                id="direccion"
+                name="direccion"
+                type="text"
                 className="form-input"
-                placeholder="999 999 999"
-                value={formData.telefono}
+                placeholder="Distrito, calle o referencia de Lima"
+                value={formData.direccion}
                 onChange={handleChange}
                 required
               />
             </div>
           </div>
-        </div>
 
-        <div className="form-group">
-          <label htmlFor="correo">Correo Electrónico</label>
-          <div className="input-wrapper">
-            <span className="input-icon" aria-hidden="true">
-              <Icon name="mail" size={18} />
-            </span>
-            <input
-              id="correo"
-              name="correo"
-              type="email"
-              className="form-input"
-              placeholder="lucia@ejemplo.com"
-              value={formData.correo}
-              onChange={handleChange}
-              required
-              autoComplete="email"
-            />
-          </div>
-        </div>
+          <PasswordInput
+            id="password"
+            name="password"
+            label="Crear Contraseña"
+            value={formData.password}
+            onChange={handleChange}
+            placeholder="Mínimo 8 caracteres"
+            autoComplete="new-password"
+          />
 
-        <div className="form-group">
-          <label htmlFor="direccion">Dirección de Residencia</label>
-          <div className="input-wrapper">
-            <span className="input-icon" aria-hidden="true">
-              <Icon name="pin" size={18} />
-            </span>
-            <input
-              id="direccion"
-              name="direccion"
-              type="text"
-              className="form-input"
-              placeholder="Distrito, calle o referencia de Lima"
-              value={formData.direccion}
-              onChange={handleChange}
-              required
-            />
-          </div>
-        </div>
-
-        <PasswordInput
-          id="password"
-          name="password"
-          label="Crear Contraseña"
-          value={formData.password}
-          onChange={handleChange}
-          placeholder="Mínimo 8 caracteres"
-          autoComplete="new-password"
-        />
-
-        <button type="submit" className="btn-primary-gradient" disabled={loading}>
-          {loading ? (
-            <>
-              <svg className="spinner-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-              </svg>
-              <span>Creando cuenta de propietario...</span>
-            </>
-          ) : (
-            <>
-              <span>Registrar Cuenta de Propietario</span>
-              <Icon name="check" size={18} />
-            </>
-          )}
-        </button>
-      </form>
+          <button type="submit" className="btn-primary-gradient" disabled={loading}>
+            {loading ? (
+              <>
+                <svg className="spinner-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                <span>Enviando código…</span>
+              </>
+            ) : (
+              <>
+                <span>Enviar código al correo</span>
+                <Icon name="check" size={18} />
+              </>
+            )}
+          </button>
+        </form>
+      )}
 
       <div className="auth-switch-footer">
         <span>¿Ya tienes una cuenta registrada?</span>

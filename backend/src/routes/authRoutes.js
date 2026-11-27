@@ -11,6 +11,7 @@ const {
   isValidEmail,
 } = require('../utils/security');
 const { sendWelcomeMessage } = require('../services/messagingService');
+const { requestRegistrationCode, verifyRegistrationCode } = require('../services/registrationCodeService');
 
 const {
   STAFF_ROLES, OWNER_ROLES, RECEPTION_ROLES,
@@ -28,6 +29,28 @@ const authLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: { message: 'Demasiados intentos. Intenta de nuevo en unos minutos.' },
+});
+
+const codeLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  limit: 8,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  message: { message: 'Se solicitaron demasiados códigos. Intenta en unos minutos.' },
+});
+
+router.post('/register/code', codeLimiter, async (req, res) => {
+  try {
+    const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
+    if (!isValidEmail(correo)) {
+      return res.status(400).json({ message: 'Ingresa un correo electrónico válido.' });
+    }
+    const result = await requestRegistrationCode(correo);
+    return res.status(result.status).json({ message: result.message });
+  } catch (err) {
+    console.error('[Auth Registro: código]', err.code || err.name);
+    return res.status(500).json({ message: 'No se pudo preparar el código. Intenta de nuevo.' });
+  }
 });
 
 router.get('/me', requireSession, (req, res) => res.json({ usuario: req.user }));
@@ -66,9 +89,13 @@ router.post('/register', authLimiter, async (req, res) => {
       return res.status(400).json({ message: 'Elige una contraseña de 8 a 128 caracteres distinta de la clave de demostración.' });
     }
 
-    const passwordHash = hashPassword(password);
+    const code = req.body?.codigo;
+    if (typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+      return res.status(400).json({ message: 'Ingresa el código de seis dígitos que recibiste por correo.' });
+    }
 
     const created = await db.withTransaction(async (conn) => {
+      if (!await verifyRegistrationCode(conn, correo, code)) return null;
       const [existingUser] = await conn.query(
         'SELECT id_usuario FROM usuarios WHERE correo = ? LIMIT 1',
         [correo]
@@ -79,12 +106,14 @@ router.post('/register', authLimiter, async (req, res) => {
         throw err;
       }
 
-      const [existingProp] = await conn.query(
-        'SELECT id_propietario FROM propietarios WHERE dni = ? OR correo = ? LIMIT 1',
+      const [existingProfiles] = await conn.query(
+        'SELECT id_propietario, id_usuario, dni, correo FROM propietarios WHERE dni = ? OR correo = ? FOR UPDATE',
         [dni, correo]
       );
-      if (existingProp.length > 0) {
-        const err = new Error('Ya existe un propietario registrado con este DNI o correo.');
+      const [profile] = existingProfiles;
+      if (profile && (existingProfiles.length !== 1 || profile.id_usuario != null ||
+          profile.dni !== dni || profile.correo?.trim().toLowerCase() !== correo)) {
+        const err = new Error('El DNI o correo está asociado a otro perfil. Comunícate con la clínica.');
         err.status = 409;
         throw err;
       }
@@ -92,19 +121,29 @@ router.post('/register', authLimiter, async (req, res) => {
       const [userRes] = await conn.query(
         `INSERT INTO usuarios (nombres, correo, contrasena_cifrada, rol, dni, telefono, direccion, estado)
          VALUES (?, ?, ?, 'Propietario', ?, ?, ?, 'activo')`,
-        [nombres, correo, passwordHash, dni, telefonoStored, direccion]
+        [nombres, correo, hashPassword(password), dni, telefonoStored, direccion]
       );
       const idUsuario = userRes.insertId;
 
-      const [propRes] = await conn.query(
-        `INSERT INTO propietarios (id_usuario, nombres, dni, telefono, correo, direccion)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [idUsuario, nombres, dni, telefonoStored, correo, direccion]
-      );
+      let idPropietario = profile?.id_propietario;
+      if (idPropietario) {
+        await conn.query(
+          'UPDATE propietarios SET id_usuario = ?, telefono = ?, direccion = ? WHERE id_propietario = ?',
+          [idUsuario, telefonoStored, direccion, idPropietario]
+        );
+      } else {
+        const [propRes] = await conn.query(
+          `INSERT INTO propietarios (id_usuario, nombres, dni, telefono, correo, direccion)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [idUsuario, nombres, dni, telefonoStored, correo, direccion]
+        );
+        idPropietario = propRes.insertId;
+      }
+      await conn.query('DELETE FROM verificaciones_registro WHERE correo = ?', [correo]);
 
       return {
         id_usuario: idUsuario,
-        id_propietario: propRes.insertId,
+        id_propietario: idPropietario,
         nombres,
         dni,
         telefono: telefonoStored,
@@ -113,6 +152,10 @@ router.post('/register', authLimiter, async (req, res) => {
         rol: 'Propietario',
       };
     });
+
+    if (!created) {
+      return res.status(400).json({ message: 'Código incorrecto, vencido o con demasiados intentos. Puedes solicitar otro.' });
+    }
 
     // Disparar mensaje automático de bienvenida al teléfono registrado (no bloqueante si falla proveedor)
     let welcomeStatus = null;
@@ -148,7 +191,7 @@ router.post('/register', authLimiter, async (req, res) => {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(409).json({ message: 'Ya existe una cuenta con este DNI o correo.' });
     }
-    console.error('[Auth Register] Error:', err);
+    console.error('[Auth Register]', err.code || err.name);
     return res.status(500).json({ message: 'Error interno al registrar propietario.' });
   }
 });
@@ -183,7 +226,7 @@ router.post('/login', authLimiter, async (req, res) => {
 
     return res.json(createSession(usuario));
   } catch (err) {
-    console.error('[Auth Login] Error:', err);
+    console.error('[Auth Login]', err.code || err.name);
     return res.status(500).json({ message: 'Error al iniciar sesión.' });
   }
 });

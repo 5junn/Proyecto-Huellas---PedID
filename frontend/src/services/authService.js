@@ -30,7 +30,15 @@ export function loginUsuarioPropietario(credentials) {
   return login(credentials, 'usuario', ROLES_USUARIOS);
 }
 
-export async function registrarUsuarioPropietario({ nombres, dni, telefono, correo, direccion, password }) {
+export function solicitarCodigoRegistro(correo) {
+  return apiFetch('/auth/register/code', {
+    authenticated: false,
+    method: 'POST',
+    body: JSON.stringify({ correo: correo.trim().toLowerCase() }),
+  });
+}
+
+export async function registrarUsuarioPropietario({ nombres, dni, telefono, correo, direccion, password, codigo }) {
   const data = await apiFetch('/auth/register', {
     authenticated: false,
     method: 'POST',
@@ -41,6 +49,7 @@ export async function registrarUsuarioPropietario({ nombres, dni, telefono, corr
       correo: correo.trim().toLowerCase(),
       direccion: direccion.trim(),
       password,
+      codigo,
     }),
   });
   return saveSession(data, ROLES_USUARIOS);
