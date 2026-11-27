@@ -30,3 +30,27 @@ test('Las rutas privadas rechazan solicitudes sin una sesión de la API', async 
     await response.json();
   }
 });
+
+test('El registro público requiere un código de correo', async (t) => {
+  const server = app.listen(0, '127.0.0.1');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  await once(server, 'listening');
+
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      nombres: 'Propietario de prueba',
+      dni: '80000001',
+      telefono: '999000001',
+      correo: 'propietario@example.invalid',
+      direccion: 'Lima',
+      password: 'Clave-local-de-prueba-01',
+    }),
+  });
+
+  assert.equal(response.status, 400);
+  const data = await response.json();
+  assert.match(data.message, /código de seis dígitos/);
+  assert.equal(data.token, undefined);
+});

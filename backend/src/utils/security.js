@@ -96,6 +96,7 @@ function isValidEmail(email) {
 
 module.exports = {
   DEMO_SEED_HASH,
+  getSigningSecret,
   hashPassword,
   verifyPassword,
   signToken,

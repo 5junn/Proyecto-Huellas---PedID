@@ -9,7 +9,7 @@ async function callExternalAIJson({ systemPrompt, userPrompt, temperature = 0.35
   const openaiKey = process.env.OPENAI_API_KEY;
 
   if (geminiKey) {
-    const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(geminiKey)}`;
 
     const resp = await fetch(endpoint, {

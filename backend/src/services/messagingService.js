@@ -1,12 +1,24 @@
 const db = require('../db');
 const { normalizePhone, sanitizeText } = require('../utils/security');
 
+function whatsappTestNumber() {
+  const raw = process.env.WHATSAPP_TEST_TO?.trim();
+  if (!raw) return null;
+  const number = normalizePhone(raw);
+  if (!/^[1-9]\d{8,14}$/.test(number)) throw new Error('WHATSAPP_TEST_TO debe tener un número válido con código de país.');
+  return number;
+}
+
 /**
  * Envía un mensaje a través de proveedores externos configurados (Meta WhatsApp Cloud API,
  * Twilio WhatsApp/SMS, Resend Email, o Webhook), con respaldo seguro en modo gateway local.
  */
 async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmail, subject, message }) {
   const cleanPhone = normalizePhone(toPhone);
+  const testNumber = canal === 'WhatsApp' ? whatsappTestNumber() : null;
+  if (testNumber && cleanPhone !== testNumber) {
+    throw new Error('El modo de prueba de WhatsApp solo permite el número configurado.');
+  }
   const text = sanitizeText(message, 2000);
   const cleanSubject = sanitizeText(subject || 'Notificación Clínica Veterinaria Huellas', 150);
 
@@ -45,7 +57,22 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
     process.env.WHATSAPP_PHONE_NUMBER_ID &&
     cleanPhone
   ) {
-    const url = `https://graph.facebook.com/v20.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const graphVersion = process.env.WHATSAPP_GRAPH_VERSION || 'v23.0';
+    const url = `https://graph.facebook.com/${graphVersion}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+    const templateName = process.env.WHATSAPP_TEMPLATE_NAME?.trim();
+    const content = templateName
+      ? {
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: process.env.WHATSAPP_TEMPLATE_LANGUAGE || 'es' },
+          components: [{
+            type: 'body',
+            parameters: [{ type: 'text', text: text.replace(/\s+/g, ' ').slice(0, 1000) }],
+          }],
+        },
+      }
+      : { type: 'text', text: { preview_url: false, body: text } };
     const resp = await fetch(url, {
       method: 'POST',
       signal: AbortSignal.timeout(8000),
@@ -57,8 +84,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to: cleanPhone,
-        type: 'text',
-        text: { preview_url: false, body: text },
+        ...content,
       }),
     });
     const data = await resp.json().catch(() => ({}));
@@ -409,7 +435,9 @@ async function processScheduledAndDueReminders({ diasAnticipacion = 15, soloVenc
     detalles: [],
   };
 
-  // 1. Buscar vacunas por vencer o vencidas que aún no tienen recordatorio activo
+  // Filtra los recordatorios de prueba antes de generar avisos o modificar su estado.
+  const testNumber = whatsappTestNumber();
+  const testPhones = testNumber ? [testNumber, testNumber.replace(/^51(?=9\d{8}$)/, '')] : [];
   const [vacunasSinAviso] = await db.queryAsync(
     `SELECT
        cv.id_vacunacion, cv.id_mascota, cv.vacuna, cv.fecha_proximo_refuerzo,
@@ -420,13 +448,12 @@ async function processScheduledAndDueReminders({ diasAnticipacion = 15, soloVenc
      INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
      LEFT JOIN recordatorios r
        ON r.id_vacunacion = cv.id_vacunacion
-       AND r.estado IN ('Programado', 'Enviado')
-       AND r.fecha_programada >= NOW() - INTERVAL 7 DAY
      WHERE cv.fecha_proximo_refuerzo <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
        AND r.id_recordatorio IS NULL
        AND p.telefono IS NOT NULL
-       AND p.telefono <> ''`,
-    [Number(diasAnticipacion) || 15]
+       AND p.telefono <> ''
+       ${testNumber ? "AND REGEXP_REPLACE(p.telefono, '[^0-9]', '') IN (?, ?)" : ''}`,
+    [Number(diasAnticipacion) || 15, ...testPhones]
   );
 
   for (const v of vacunasSinAviso) {
@@ -468,8 +495,10 @@ async function processScheduledAndDueReminders({ diasAnticipacion = 15, soloVenc
      INNER JOIN mascotas m ON r.id_mascota = m.id_mascota
      INNER JOIN propietarios p ON r.id_propietario = p.id_propietario
      WHERE r.estado = 'Programado' ${dateFilter}
+       ${testNumber ? "AND (r.canal <> 'WhatsApp' OR REGEXP_REPLACE(r.telefono_destino, '[^0-9]', '') IN (?, ?))" : ''}
      ORDER BY r.fecha_programada ASC
-     LIMIT 50`
+     LIMIT 50`,
+    testPhones
   );
 
   for (const rec of pendientes) {

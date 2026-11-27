@@ -1,6 +1,16 @@
 const db = require('./db');
 
 const SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS verificaciones_registro (
+    correo VARCHAR(120) NOT NULL PRIMARY KEY,
+    nonce CHAR(32) DEFAULT NULL,
+    codigo_hash CHAR(64) DEFAULT NULL,
+    intentos TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    vence_en DATETIME DEFAULT NULL,
+    reenviar_en DATETIME DEFAULT NULL,
+    INDEX (vence_en)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS usuarios (
     id_usuario INT AUTO_INCREMENT PRIMARY KEY,
     nombres VARCHAR(120) NOT NULL,
@@ -163,10 +173,19 @@ const SCHEMA_STATEMENTS = [
 ];
 
 const SAFE_ALTERS = [
+  'ALTER TABLE usuarios ADD COLUMN dni VARCHAR(20) DEFAULT NULL',
+  'ALTER TABLE usuarios ADD COLUMN telefono VARCHAR(30) DEFAULT NULL',
+  'ALTER TABLE usuarios ADD COLUMN direccion VARCHAR(255) DEFAULT NULL',
+  'ALTER TABLE usuarios ADD COLUMN especialidad VARCHAR(100) DEFAULT NULL',
+  'ALTER TABLE usuarios ADD COLUMN turno VARCHAR(60) DEFAULT NULL',
+  "ALTER TABLE usuarios ADD COLUMN estado ENUM('activo', 'inactivo') NOT NULL DEFAULT 'activo'",
+  'ALTER TABLE propietarios ADD COLUMN id_usuario INT DEFAULT NULL',
+  'ALTER TABLE mascotas ADD COLUMN id_raza INT DEFAULT NULL',
   'ALTER TABLE mascotas ADD COLUMN edad VARCHAR(50) DEFAULT NULL',
-  'ALTER TABLE mascotas MODIFY COLUMN foto_url LONGTEXT DEFAULT NULL',
   'ALTER TABLE consultas_historial ADD COLUMN veterinario_nombre VARCHAR(120) DEFAULT NULL',
   'ALTER TABLE consultas_historial ADD COLUMN borrador_ia TEXT DEFAULT NULL',
+  'ALTER TABLE carnet_vacunacion ADD COLUMN id_veterinario INT DEFAULT NULL',
+  'ALTER TABLE carnet_vacunacion ADD COLUMN observaciones VARCHAR(255) DEFAULT NULL',
   'ALTER TABLE carnet_vacunacion ADD COLUMN veterinario_nombre VARCHAR(120) DEFAULT NULL',
   'ALTER TABLE recordatorios ADD COLUMN id_vacunacion INT DEFAULT NULL',
   'ALTER TABLE recordatorios ADD COLUMN correo_destino VARCHAR(120) DEFAULT NULL',
@@ -174,32 +193,81 @@ const SAFE_ALTERS = [
   'ALTER TABLE recordatorios ADD COLUMN provider_name VARCHAR(80) DEFAULT NULL',
   'ALTER TABLE recordatorios ADD COLUMN generado_por_ia TINYINT(1) NOT NULL DEFAULT 0',
   'ALTER TABLE recordatorios ADD COLUMN intentos INT NOT NULL DEFAULT 0',
+  'ALTER TABLE recordatorios ADD COLUMN enviado_en DATETIME DEFAULT NULL',
   'ALTER TABLE recordatorios ADD COLUMN ultimo_error VARCHAR(255) DEFAULT NULL',
 ];
 
-async function initDatabase() {
-  const connected = await db.checkConnection();
-  if (!connected) {
-    console.warn('[DB Init] MySQL no accesible en este entorno. Saltando migración automática.');
-    return false;
-  }
+async function readColumns(conn, table) {
+  const [rows] = await conn.query(
+    `SELECT COLUMN_NAME AS nombre, COLUMN_TYPE AS tipo, COLUMN_KEY AS clave, EXTRA AS extra
+     FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+    [table]
+  );
+  return rows;
+}
 
-  // Fix backticks in SCHEMA_STATEMENTS if any
-  for (const rawSql of SCHEMA_STATEMENTS) {
-    const sql = rawSql.replace(/`/g, '');
-    await db.queryAsync(sql);
-  }
+async function migrateVaccineId(conn) {
+  const columns = await readColumns(conn, 'carnet_vacunacion');
+  if (!columns.length || columns.some((column) => column.nombre === 'id_vacunacion')) return;
 
-  for (const alterSql of SAFE_ALTERS) {
-    try {
-      await db.queryAsync(alterSql);
-    } catch {
-      // MySQL < 8.0.29 does not support ADD COLUMN IF NOT EXISTS; ignore duplicate column errors safely
+  const primary = columns.filter((column) => column.clave === 'PRI');
+  if (primary.length !== 1 || primary[0].extra !== 'auto_increment') {
+    throw new Error('El carnet anterior necesita una clave primaria numérica autoincremental para migrar a id_vacunacion.');
+  }
+  // El renombre conserva las filas, los identificadores y los índices del carnet.
+  const oldName = conn.escapeId(primary[0].nombre);
+  await conn.query(`ALTER TABLE carnet_vacunacion RENAME COLUMN ${oldName} TO id_vacunacion`);
+}
+
+async function migrateColumns(conn) {
+  const tableColumns = new Map();
+  for (const sql of SAFE_ALTERS) {
+    const [, table, column] = sql.match(/^ALTER TABLE (\w+) ADD COLUMN (\w+)/);
+    if (!tableColumns.has(table)) {
+      tableColumns.set(table, await readColumns(conn, table));
+    }
+    if (!tableColumns.get(table).some((entry) => entry.nombre === column)) {
+      await conn.query(sql);
     }
   }
+  const role = (await readColumns(conn, 'usuarios')).find((column) => column.nombre === 'rol');
+  if (role?.tipo.startsWith('enum(') && !role.tipo.includes("'Propietario'")) {
+    const [unknownRoles] = await conn.query(
+      "SELECT 1 FROM usuarios WHERE rol NOT IN ('Administrador', 'Veterinario', 'Recepcionista') LIMIT 1"
+    );
+    if (unknownRoles.length) throw new Error('La tabla usuarios contiene roles antiguos que requieren revisión.');
+    await conn.query(
+      "ALTER TABLE usuarios MODIFY COLUMN rol ENUM('Administrador', 'Veterinario', 'Recepcionista', 'Propietario') NOT NULL DEFAULT 'Propietario'"
+    );
+  }
+  const photo = (await readColumns(conn, 'mascotas')).find((column) => column.nombre === 'foto_url');
+  if (photo && photo.tipo !== 'longtext') {
+    await conn.query('ALTER TABLE mascotas MODIFY COLUMN foto_url LONGTEXT DEFAULT NULL');
+  }
+}
 
-  console.log('[DB Init] Esquema MySQL verificado y listo (10 tablas activas).');
-  return true;
+async function initDatabase() {
+  if (!await db.checkConnection()) return false;
+
+  const conn = await db.promise().getConnection();
+  let locked = false;
+  try {
+    const [[result]] = await conn.query("SELECT GET_LOCK(SHA2(CONCAT(DATABASE(), ':huellas-schema'), 256), 30) AS locked");
+    locked = result.locked === 1;
+    if (!locked) throw new Error('No se obtuvo el bloqueo para migrar MySQL.');
+
+    await migrateVaccineId(conn);
+    for (const sql of SCHEMA_STATEMENTS) await conn.query(sql);
+    await migrateColumns(conn);
+    console.log('[DB Init] Esquema MySQL verificado y actualizado.');
+    return true;
+  } finally {
+    try {
+      if (locked) await conn.query("SELECT RELEASE_LOCK(SHA2(CONCAT(DATABASE(), ':huellas-schema'), 256))");
+    } finally {
+      conn.release();
+    }
+  }
 }
 
 module.exports = { initDatabase };

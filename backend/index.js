@@ -43,6 +43,11 @@ app.get('/', async (req, res) => {
     mensaje: '¡El backend de Huellas PetID está funcionando correctamente!',
     mysql_conectado: dbOnline,
     ia_externa_configurada: Boolean(process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY),
+    correo_registro_configurado: Boolean(process.env.RESEND_API_KEY?.trim() && process.env.EMAIL_FROM?.trim()),
+    whatsapp_configurado: Boolean(
+      (process.env.WHATSAPP_CLOUD_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID) ||
+      (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_FROM)
+    ),
     mensajeria_externa_configurada: Boolean(
       process.env.WHATSAPP_CLOUD_TOKEN || process.env.TWILIO_ACCOUNT_SID || process.env.RESEND_API_KEY
     ),
@@ -136,15 +141,17 @@ app.post('/api/reminders/whatsapp', requireSession, allowRoles(RECEPTION_ROLES),
 if (require.main === module) {
   initDatabase()
     .then((ok) => {
-      if (ok) {
-        startScheduler();
-      }
+      if (!ok) throw new Error('MySQL no está disponible. Revisa la configuración DB_* del archivo .env.');
+      startScheduler();
+      app.listen(PORT, () => {
+        console.log(`Servidor Huellas PetID corriendo en el puerto ${PORT}`);
+      });
     })
-    .catch((err) => console.warn('[Startup DB]', err.message));
-
-  app.listen(PORT, () => {
-    console.log(`Servidor Huellas PetID corriendo en el puerto ${PORT}`);
-  });
+    .catch(async (err) => {
+      console.error('[Startup DB]', err.message);
+      await db.end();
+      process.exitCode = 1;
+    });
 }
 
 module.exports = app;
