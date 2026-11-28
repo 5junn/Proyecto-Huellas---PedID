@@ -11,12 +11,13 @@ export default function DashboardCharts({ metrics, clinical, status }) {
 
   if (status !== 'ready' || !metrics) return null;
 
-  const rows = metrics.series[series] || [];
-  const byDay = new Map(rows.map(({ dia, cantidad }) => [dia, Number(cantidad)]));
+  const rows = metrics.series?.[series];
+  const byDay = new Map((rows || []).map(({ dia, cantidad }) => [dia, Number(cantidad)]));
   const grouped = range === 56;
   const binSize = grouped ? 7 : 1;
   const end = Date.parse(metrics.hoy);
-  const bins = Array.from({ length: range / binSize }, (_, index) => {
+  const available = Array.isArray(rows) && Number.isFinite(end);
+  const bins = Array.from({ length: available ? range / binSize : 0 }, (_, index) => {
     const start = end - (range - 1 - index * binSize) * DAY_MS;
     const startDay = new Date(start).toISOString().slice(0, 10);
     const label = startDay.slice(5).split('-').reverse().join('/');
@@ -25,8 +26,8 @@ export default function DashboardCharts({ metrics, clinical, status }) {
     ).reduce((sum, count) => sum + count, 0);
     return { label, total };
   });
-  const totalPets = Number(metrics.totales.mascotas);
-  const species = metrics.especies.map(({ especie, cantidad }, index) => ({
+  const totalPets = (metrics.especies || []).reduce((total, { cantidad }) => total + Number(cantidad), 0);
+  const species = (metrics.especies || []).map(({ especie, cantidad }, index) => ({
     name: especie,
     count: Number(cantidad),
     value: Number(cantidad) / totalPets * 100,
@@ -50,9 +51,13 @@ export default function DashboardCharts({ metrics, clinical, status }) {
           <button type="button" className={range === 7 ? 'on' : ''} aria-pressed={range === 7} onClick={() => setRange(7)}>7 días</button>
           <button type="button" className={range === 56 ? 'on' : ''} aria-pressed={range === 56} onClick={() => setRange(56)}>8 semanas</button>
         </div>
-        {bins.some(({ total }) => total > 0)
-          ? <BarChart labels={bins.map(({ label }) => label)} data={bins.map(({ total }) => total)} label={SERIES_LABELS[series]} />
-          : <p className="staff-empty-state">Sin actividad de «{SERIES_LABELS[series].toLowerCase()}» en este periodo.</p>}
+        {available ? (
+          bins.some(({ total }) => total > 0)
+            ? <BarChart labels={bins.map(({ label }) => label)} data={bins.map(({ total }) => total)} label={SERIES_LABELS[series]} />
+            : <p className="staff-empty-state">Sin actividad de «{SERIES_LABELS[series].toLowerCase()}» en este periodo.</p>
+        ) : <p className="staff-empty-state">
+          {metrics.series ? 'Este indicador todavía no está disponible.' : 'Actualiza y reinicia el backend para cargar las series del gráfico.'}
+        </p>}
       </article>
 
       <article className="card">
@@ -66,7 +71,9 @@ export default function DashboardCharts({ metrics, clinical, status }) {
               ))}
             </ul>
           </>
-        ) : <p className="staff-empty-state">Registra una mascota para ver la distribución.</p>}
+        ) : <p className="staff-empty-state">
+          {Array.isArray(metrics.especies) ? 'Registra una mascota para ver la distribución.' : 'No se pudo cargar la distribución.'}
+        </p>}
       </article>
     </section>
   );

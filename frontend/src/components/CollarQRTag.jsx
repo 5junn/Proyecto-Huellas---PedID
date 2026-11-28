@@ -6,11 +6,10 @@ import { apiFetch } from '../services/apiClient';
 
 export default function CollarQRTag({
   pet,
-  onScanSimulate,
   showActions = true,
   compact = false
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyStatus, setCopyStatus] = useState('');
   const [realQrDataUrl, setRealQrDataUrl] = useState('');
 
   // Detección de host de red local para que el celular abra la página al escanear
@@ -29,7 +28,7 @@ export default function CollarQRTag({
       apiFetch('/network-ip', { authenticated: false })
         .then((data) => {
           if (data?.ip && data.ip !== 'localhost') {
-            setNetworkHost(`${data.ip}:5173`);
+            setNetworkHost(window.location.port ? `${data.ip}:${window.location.port}` : data.ip);
           }
         })
         .catch(() => {});
@@ -37,12 +36,12 @@ export default function CollarQRTag({
   }, []);
 
   const protocol = typeof window !== 'undefined' ? window.location.protocol : 'http:';
-  const qrCodeValue = pet?.codigoQR || pet?.codigo || 'HP-4092';
-  const qrTargetUrl = `${protocol}//${networkHost}/pet/${qrCodeValue}`;
+  const qrCodeValue = pet?.codigoQR || pet?.codigo;
+  const qrTargetUrl = qrCodeValue ? `${protocol}//${networkHost}/pet/${encodeURIComponent(qrCodeValue)}` : '';
 
   // Generación matemática de Código QR 100% Real y Escaneable (Nivel de corrección H)
   useEffect(() => {
-    if (!pet) return undefined;
+    if (!qrTargetUrl) return undefined;
     let active = true;
     QRCode.toDataURL(qrTargetUrl, {
       width: compact ? 200 : 260,
@@ -63,14 +62,18 @@ export default function CollarQRTag({
     return () => {
       active = false;
     };
-  }, [pet, qrTargetUrl, compact]);
+  }, [qrTargetUrl, compact]);
 
-  if (!pet) return null;
+  if (!qrTargetUrl) return <p>Esta mascota todavía no tiene una placa registrada.</p>;
 
-  const handleCopyLink = () => {
-    navigator.clipboard?.writeText(qrTargetUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+  const handleCopyLink = async () => {
+    try {
+      if (!navigator.clipboard) throw new Error();
+      await navigator.clipboard.writeText(qrTargetUrl);
+      setCopyStatus('Enlace copiado.');
+    } catch {
+      setCopyStatus('No se pudo copiar. Abre la ficha para copiar su dirección.');
+    }
   };
 
   const handlePrint = () => {
@@ -170,14 +173,7 @@ export default function CollarQRTag({
             {pet.nombre?.toUpperCase() || 'MI MASCOTA'}
           </h4>
 
-          <div
-            onClick={() => {
-              if (onScanSimulate) {
-                onScanSimulate();
-              } else {
-                window.open(qrTargetUrl, '_blank');
-              }
-            }}
+          <a href={qrTargetUrl} target="_blank" rel="noreferrer"
             title="Haz clic para escanear y abrir la ficha médica oficial"
             style={{
               background: '#FFFFFF',
@@ -217,7 +213,7 @@ export default function CollarQRTag({
                 Generando QR real...
               </div>
             )}
-          </div>
+          </a>
 
           <div
             style={{
@@ -282,32 +278,8 @@ export default function CollarQRTag({
             }}
           >
             <Icon name="qr" size={18} />
-            <span>📱 Escanear Placa QR (Abrir Ficha Oficial ↗)</span>
+            <span>Abrir ficha pública</span>
           </a>
-
-          {onScanSimulate && (
-            <button
-              type="button"
-              onClick={onScanSimulate}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem',
-                padding: '0.65rem 1rem',
-                borderRadius: '12px',
-                background: 'rgba(56, 189, 248, 0.12)',
-                color: '#38BDF8',
-                border: '1px solid rgba(56, 189, 248, 0.3)',
-                fontWeight: 600,
-                fontSize: '0.82rem',
-                cursor: 'pointer'
-              }}
-            >
-              <Icon name="clipboard" size={16} />
-              <span>Ver Ficha Habitual / Control en esta ventana</span>
-            </button>
-          )}
 
           <div style={{ display: 'flex', gap: '0.5rem' }}>
             <button
@@ -330,7 +302,7 @@ export default function CollarQRTag({
               }}
             >
               <Icon name="clipboard" size={15} />
-              <span>{copied ? '¡Copiado!' : 'Copiar URL QR'}</span>
+              <span>Copiar enlace de la placa</span>
             </button>
 
             <button
@@ -356,6 +328,7 @@ export default function CollarQRTag({
               <span>Imprimir Placa</span>
             </button>
           </div>
+          {copyStatus && <p role="status">{copyStatus}</p>}
         </div>
       )}
     </div>

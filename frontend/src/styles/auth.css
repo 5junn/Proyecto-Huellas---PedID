@@ -396,59 +396,6 @@
   to { transform: rotate(360deg); }
 }
 
-/* Demo Box */
-.auth-quick-demo {
-  margin-top: 1.4rem;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-md);
-  padding: 0.85rem 1rem;
-}
-
-.demo-label {
-  display: block;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #94A3B8;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 0.5rem;
-}
-
-.demo-buttons-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.demo-chip-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.38rem 0.75rem;
-  font-size: 0.76rem;
-  font-weight: 700;
-  background: rgba(255, 255, 255, 0.06);
-  color: #CBD5E1;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-pill);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.demo-chip-btn:hover {
-  background: rgba(245, 158, 11, 0.2);
-  border-color: #F59E0B;
-  color: #FDE68A;
-  transform: translateY(-1px);
-}
-
-.demo-chip-btn.owner:hover {
-  background: rgba(16, 185, 129, 0.2);
-  border-color: #10B981;
-  color: #A7F3D0;
-}
-
 /* Footers */
 .auth-switch-footer {
   margin-top: 1.4rem;
@@ -585,4 +532,22 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.5rem;
+}
+
+.hp-pet-photo-input {
+  display: grid;
+  gap: .65rem;
+  margin-top: 1.2rem;
+}
+
+.hp-pet-photo-input > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .65rem;
+}
+
+.hp-pet-photo-input img {
+  object-fit: cover;
+  border-radius: .65rem;
 }

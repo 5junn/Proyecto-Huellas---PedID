@@ -54,6 +54,7 @@ const SECTIONS = {
 const STATUS_TEXT = { done: 'Atendida', progress: 'En curso', waiting: 'En espera' };
 
 const VACCINE_STATUS = { 'al-dia': 'Vigente', 'por-vencer': 'Por vencer', vencida: 'Vencida' };
+const EMPTY_OWNER = { nombres: '', dni: '', correo: '', telefono: '', direccion: '' };
 const EMPTY_BATCH = { vacuna: '', lote_fabricante: '', fecha_vencimiento: '', dosis_iniciales: '' };
 const dateKey = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Lima' });
 
@@ -100,6 +101,7 @@ export default function Dashboard({ user: currentUser }) {
   const [modalVacunaOpen, setModalVacunaOpen] = useState(false);
   const [modalBatchOpen, setModalBatchOpen] = useState(false);
   const [modalStaffOpen, setModalStaffOpen] = useState(false);
+  const [modalOwnerOpen, setModalOwnerOpen] = useState(false);
   const [modalPetOpen, setModalPetOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [modalAlertasOpen, setModalAlertasOpen] = useState(false);
@@ -183,7 +185,7 @@ export default function Dashboard({ user: currentUser }) {
   const [formPet, setFormPet] = useState({
     nombre: '',
     especie: 'Canino',
-    raza: 'Beagle',
+    raza: '',
     id_propietario: '',
     sexo: 'Macho',
     edad: '',
@@ -197,6 +199,7 @@ export default function Dashboard({ user: currentUser }) {
   const [formVacuna, setFormVacuna] = useState({
     id_mascota: '', id_lote: '', fecha_aplicacion: today, fecha_proximo_refuerzo: '', observaciones: '',
   });
+  const [formOwner, setFormOwner] = useState(EMPTY_OWNER);
   const [formBatch, setFormBatch] = useState(EMPTY_BATCH);
   const [formStaff, setFormStaff] = useState({
     nombres: '', correo: '', rol: 'Veterinario', password: '', especialidad: '', turno: 'Mañana (8:00 - 14:00)',
@@ -294,9 +297,16 @@ export default function Dashboard({ user: currentUser }) {
     showToast('Lote registrado en el inventario.');
   });
 
+  const handleCreateOwner = (event) => saveForm(event, '/auth/propietarios', formOwner, (saved) => {
+    setModalOwnerOpen(false);
+    setFormOwner(EMPTY_OWNER);
+    setFormPet((current) => ({ ...current, id_propietario: String(saved.id_propietario) }));
+    showToast(`Perfil de ${saved.nombres} registrado.`);
+  });
+
   const handleCreatePetReception = (event) => saveForm(event, '/mascotas', formPet, (saved) => {
     setModalPetOpen(false);
-    setFormPet({ nombre: '', especie: 'Canino', raza: 'Beagle', id_propietario: '', sexo: 'Macho', edad: '', peso: '', alergias: '' });
+    setFormPet({ nombre: '', especie: 'Canino', raza: '', id_propietario: '', sexo: 'Macho', edad: '', peso: '', alergias: '' });
     showToast(`Paciente registrado con placa ${saved.codigo_qr}.`);
   });
 
@@ -351,7 +361,6 @@ export default function Dashboard({ user: currentUser }) {
     return loadErrors.some((error) => error.path === path) ? 'error' : 'ready';
   };
 
-  const activeOwners = propietarios.filter((owner) => owner.cuenta_estado === 'activo');
   const search = searchTerm.trim().toLowerCase();
   const visiblePets = mascotas.filter((pet) =>
     (statusFilter === 'all' || pet.especie === statusFilter) &&
@@ -625,11 +634,12 @@ export default function Dashboard({ user: currentUser }) {
 
         <div className="page">
           {pending && <p role="status">Cargando datos de la clínica…</p>}
-          {loadErrors.length > 0 && (
+          {(loadErrors.length > 0 || metrics?.avisos?.length > 0) && (
             <div className="staff-load-error" role="alert">
               <strong>Algunos datos no se pudieron cargar.</strong>
               <ul>
                 {loadErrors.map(({ path, label, message }) => <li key={path}>{label}: {message}</li>)}
+                {metrics?.avisos?.map(({ label, message }) => <li key={label}>{label}: {message}</li>)}
               </ul>
               <button className="btn btn-outline sm" type="button" onClick={() => { loadAllFromBackend(); refreshAlerts(); }}>Reintentar</button>
             </div>
@@ -1359,6 +1369,9 @@ export default function Dashboard({ user: currentUser }) {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
+                  <button type="button" className="btn-staff-primary" onClick={() => { setFormError(''); setModalOwnerOpen(true); }}>
+                    <Icon name="plus" size={16} /> Registrar propietario
+                  </button>
                 </div>
               </div>
 
@@ -1859,6 +1872,41 @@ export default function Dashboard({ user: currentUser }) {
         </div>
       )}
 
+      {modalOwnerOpen && (
+        <div className="staff-modal-overlay" onClick={() => setModalOwnerOpen(false)}>
+          <section className="staff-modal-box" role="dialog" aria-modal="true" aria-labelledby="owner-title"
+            onClick={(event) => event.stopPropagation()}>
+            <header className="staff-modal-header">
+              <h3 id="owner-title">Registrar propietario</h3>
+              <button type="button" aria-label="Cerrar" onClick={() => setModalOwnerOpen(false)}><Icon name="close" size={20} /></button>
+            </header>
+            <form onSubmit={handleCreateOwner}>
+              {formError && <p role="alert">{formError}</p>}
+              <div className="staff-modal-body">
+                <p>El perfil permite registrar mascotas. El propietario podrá acceder cuando verifique su correo en el registro público.</p>
+                {[
+                  ['nombres', 'Nombre completo', 'text', 120],
+                  ['dni', 'DNI', 'text', 8],
+                  ['correo', 'Correo electrónico', 'email', 120],
+                  ['telefono', 'Celular', 'tel', 30],
+                  ['direccion', 'Dirección', 'text', 255],
+                ].map(([key, label, type, maxLength]) => (
+                  <label key={key}>{label}
+                    <input className="staff-input-field" type={type} maxLength={maxLength}
+                      inputMode={key === 'dni' ? 'numeric' : undefined} required value={formOwner[key]}
+                      onChange={(event) => setFormOwner({ ...formOwner, [key]: event.target.value })} />
+                  </label>
+                ))}
+              </div>
+              <div className="staff-modal-footer">
+                <button type="button" className="btn-staff-secondary" onClick={() => setModalOwnerOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn-staff-primary" disabled={saving}>Guardar propietario</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
       {/* MODAL 4: REGISTRAR PACIENTE QR (RECEPCIÓN & ADMIN) */}
       {modalPetOpen && (
         <div className="staff-modal-overlay" onClick={() => setModalPetOpen(false)}>
@@ -1897,12 +1945,18 @@ export default function Dashboard({ user: currentUser }) {
                     <select className="staff-input-field" required value={formPet.id_propietario}
                       onChange={(event) => setFormPet({ ...formPet, id_propietario: event.target.value })}>
                       <option value="">Selecciona un propietario registrado</option>
-                      {activeOwners.map((owner) => (
+                      {propietarios.map((owner) => (
                         <option key={owner.id_propietario} value={owner.id_propietario}>{owner.nombres} · {owner.correo}</option>
                       ))}
                     </select>
-                    {resourceStatus('/auth/propietarios') === 'ready' && activeOwners.length === 0 && (
-                      <p className="staff-empty-state">El propietario debe completar su registro antes de que puedas asignarle una mascota.</p>
+                    {resourceStatus('/auth/propietarios') === 'ready' && propietarios.length === 0 && (
+                      <p className="staff-empty-state">Registra al propietario primero.{' '}
+                        <button type="button" className="btn btn-outline sm" onClick={() => {
+                          setModalPetOpen(false);
+                          setFormError('');
+                          setModalOwnerOpen(true);
+                        }}>Registrar propietario</button>
+                      </p>
                     )}
                   </div>
                 </div>
@@ -1917,8 +1971,7 @@ export default function Dashboard({ user: currentUser }) {
                       value={formPet.especie}
                       onChange={(e) => {
                         const esp = e.target.value;
-                        const rList = getRazasPorEspecie(esp);
-                        setFormPet({ ...formPet, especie: esp, raza: rList[0] || 'Mestizo' });
+                        setFormPet({ ...formPet, especie: esp, raza: '' });
                       }}
                     >
                       <option value="Canino">Canino (Perro)</option>
@@ -1930,13 +1983,14 @@ export default function Dashboard({ user: currentUser }) {
                   </div>
                   <div>
                     <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Raza (Catálogo Normalizado) *
+                      Raza
                     </label>
                     <select
                       className="staff-input-field"
                       value={formPet.raza}
                       onChange={(e) => setFormPet({ ...formPet, raza: e.target.value })}
                     >
+                      <option value="">Sin raza registrada</option>
                       {getRazasPorEspecie(formPet.especie).map((r) => (
                         <option key={r} value={r} style={{ background: '#0F172A', color: '#FFFFFF' }}>{r}</option>
                       ))}
@@ -2004,7 +2058,7 @@ export default function Dashboard({ user: currentUser }) {
                 <button type="button" className="btn-staff-secondary" onClick={() => setModalPetOpen(false)}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-staff-primary" disabled={saving}>
+                <button type="submit" className="btn-staff-primary" disabled={saving || !propietarios.length}>
                   <Icon name="check" size={16} /> Registrar y Emitir Placa QR
                 </button>
               </div>

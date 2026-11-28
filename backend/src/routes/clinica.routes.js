@@ -38,8 +38,13 @@ router.get('/dashboard', allowRoles(STAFF_ROLES), async (req, res) => {
   try {
     res.json(await loadDashboard(CLINICAL_ROLES.includes(req.user.rol)));
   } catch (err) {
-    console.error('[Clinica Dashboard] Error:', err);
-    res.status(500).json({ error: 'Error al cargar métricas clínicas' });
+    console.error('[Dashboard MySQL]', err.code || err.name, err.sqlMessage || err.message);
+    const unavailable = ['ECONNREFUSED', 'ETIMEDOUT', 'PROTOCOL_CONNECTION_LOST', 'ER_CON_COUNT_ERROR'].includes(err.code);
+    res.status(unavailable ? 503 : 500).json({
+      error: unavailable
+        ? 'MySQL no está disponible. Revisa que esté iniciado y que backend/.env apunte a la base de la clínica.'
+        : 'No se pudieron consultar los indicadores en MySQL. Revisa el mensaje [Dashboard MySQL] en la terminal del backend.',
+    });
   }
 });
 
@@ -74,7 +79,7 @@ router.get('/consultas', clinicalOnly, async (req, res) => {
       peso: c.peso,
       temperatura: c.temperatura,
       vet: c.veterinario_nombre || 'Sin profesional registrado',
-      time: new Date(c.fecha_hora).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' }),
+      time: c.fecha_hora ? new Date(c.fecha_hora).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' }) : null,
       fecha_hora: c.fecha_hora,
       status: c.estado,
     }));
@@ -128,8 +133,8 @@ router.post('/consultas', clinicalOnly, async (req, res) => {
     const idConsulta = await db.withTransaction(async (conn) => {
       const [ins] = await conn.query(
         `INSERT INTO consultas_historial
-         (id_mascota, id_veterinario, veterinario_nombre, motivo_consulta, temperatura, peso, diagnostico, tratamiento_receta, borrador_ia, estado)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id_mascota, id_veterinario, veterinario_nombre, motivo_consulta, temperatura, peso, diagnostico, tratamiento_receta, borrador_ia, estado, fecha_hora)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         [pet.id_mascota, req.user.id, vetName, reason, temperatura, peso, diagnostico, tratamiento || null, borradorIA || null, estado]
       );
       if (peso !== null) {

@@ -55,7 +55,7 @@ router.get('/', petAccess, async (req, res) => {
     let sql = `
       SELECT
         m.*,
-        COALESCE(r.nombre_raza, m.raza, 'Mestizo') AS raza_nombre,
+        COALESCE(r.nombre_raza, m.raza) AS raza_nombre,
         p.nombres AS propietario_nombre,
         p.telefono AS propietario_telefono,
         p.correo AS propietario_correo,
@@ -222,7 +222,7 @@ router.get('/:codigo', async (req, res) => {
     const codigo = sanitizeText(req.params.codigo, 50).toUpperCase();
     const [rows] = await db.queryAsync(
       `SELECT m.*,
-        COALESCE(r.nombre_raza, m.raza, 'Mestizo') AS raza_nombre,
+        COALESCE(r.nombre_raza, m.raza) AS raza_nombre,
         p.nombres AS propietario_nombre,
         p.telefono AS propietario_telefono,
         p.direccion AS propietario_direccion
@@ -270,7 +270,6 @@ router.get('/:codigo', async (req, res) => {
       clinica: process.env.CLINIC_NAME || 'Clínica Veterinaria Huellas',
       dirClinica: process.env.CLINIC_ADDRESS?.trim() || null,
       telClinica: process.env.CLINIC_PHONE?.trim() || null,
-      horarioClinica: 'Lunes a Domingo · Emergencias 24/7',
       vacunas: vacunas.map((vaccine) => {
         const { nombre, fecha, proxima, estado, vet } = formatVaccine(vaccine, today);
         return { nombre, fecha, proxima, estado, vet };
@@ -302,7 +301,7 @@ router.post('/', requireSession, allowRoles([...RECEPTION_ROLES, ...OWNER_ROLES]
     }
 
     const especie = mapSpeciesToDb(body.especie);
-    const raza = sanitizeText(body.raza || body.raza_nombre || 'Mestizo', 80);
+    const raza = sanitizeText(body.raza || body.raza_nombre, 80);
     const sexo = body.sexo === 'Hembra' ? 'Hembra' : 'Macho';
     const foto = body.foto_url || body.foto || null;
     if (foto && (typeof foto !== 'string' || !/^(https?:\/\/|data:image\/(jpeg|png|webp|gif);base64,)/i.test(foto))) {
@@ -322,22 +321,18 @@ router.post('/', requireSession, allowRoles([...RECEPTION_ROLES, ...OWNER_ROLES]
 
     const created = await db.withTransaction(async (conn) => {
       const [[owner]] = await conn.query(
-        `SELECT p.id_propietario, p.nombres, p.telefono, p.correo FROM propietarios p
-         INNER JOIN usuarios u ON p.id_usuario = u.id_usuario OR (
-           p.id_usuario IS NULL AND p.correo = u.correo AND p.dni = u.dni
-         )
-         WHERE p.id_propietario = ? AND u.rol = 'Propietario' AND u.estado = 'activo' LIMIT 1`,
+        'SELECT id_propietario, nombres, telefono, correo FROM propietarios WHERE id_propietario = ?',
         [ownerId]
       );
       if (!owner) return null;
 
-      const [[razaRow]] = await conn.query('SELECT id_raza FROM razas WHERE nombre_raza = ? AND especie = ? LIMIT 1', [raza, especie]);
+      const [[razaRow]] = await conn.query('SELECT id_raza FROM razas WHERE nombre_raza = ? AND especie = ? LIMIT 1', [raza || null, especie]);
       const [pet] = await conn.query(
         `INSERT INTO mascotas
-         (id_propietario, id_raza, codigo_qr, microchip, nombre, especie, raza, sexo, edad, fecha_nacimiento, peso_actual, color, foto_url, alergias, recompensa)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+         (id_propietario, id_raza, codigo_qr, microchip, nombre, especie, raza, sexo, edad, fecha_nacimiento, peso_actual, color, foto_url, alergias, recompensa, creado_en)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP)`,
         [
-          ownerId, razaRow?.id_raza || null, codigoQR, microchip, nombre, especie, raza, sexo,
+          ownerId, razaRow?.id_raza || null, codigoQR, microchip, nombre, especie, raza || null, sexo,
           sanitizeText(body.edad, 50) || null, body.fecha_nacimiento || null, peso,
           sanitizeText(body.color, 80) || null, foto, sanitizeText(body.alergias, 500) || null,
         ]
@@ -371,7 +366,7 @@ router.post('/', requireSession, allowRoles([...RECEPTION_ROLES, ...OWNER_ROLES]
       };
     });
 
-    if (!created) return res.status(404).json({ error: 'El propietario debe tener una cuenta activa antes de registrar la mascota.' });
+    if (!created) return res.status(404).json({ error: 'No se encontró el perfil del propietario. Regístralo antes de asignarle una mascota.' });
     return res.status(201).json({ success: true, ...created });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Ya existe una mascota con esa placa o microchip.' });

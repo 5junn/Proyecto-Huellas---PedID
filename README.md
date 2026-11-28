@@ -31,7 +31,9 @@ El proyecto está desarrollado bajo una arquitectura web moderna:
 
 Entra por **Personal Clínico** en el login. Con una cuenta administradora, el menú **Administración → Cuentas de usuario** muestra todas las cuentas, incluidas las de propietarios, y permite filtrarlas por rol o buscarlas por nombre y correo. Recepción tiene un inicio con mascotas, propietarios, recordatorios y alertas GPS de la base configurada.
 
-El registro público crea usuarios propietarios. Para crear el primer administrador, ejecuta `node scripts/provision-admin.js` desde `backend` con acceso autorizado a la base de datos y las variables `STAFF_ADMIN_NAME`, `STAFF_ADMIN_EMAIL` y `STAFF_ADMIN_PASSWORD`. La contraseña requiere al menos 12 caracteres. Para cambiar la contraseña de un administrador existente, usa el mismo script con `--reset-password`. Configura la contraseña por un canal seguro.
+En la carpeta `backend`, ejecuta `npm run admin`. La terminal indica el nombre de la base y lista los correos de administrador. Si todavía no hay una cuenta administradora, te pide tu nombre, correo y una contraseña de al menos 12 caracteres. La contraseña se introduce sin mostrarla. Luego entra desde **Personal Clínico**.
+
+Si olvidaste la contraseña de una cuenta administradora, usa `npm run admin -- --reset-password` e indica el correo listado. La opción **Olvidé mi contraseña** del sitio también funciona si Resend está configurado. En instalaciones automatizadas se pueden seguir usando `STAFF_ADMIN_NAME`, `STAFF_ADMIN_EMAIL` y `STAFF_ADMIN_PASSWORD`.
 
 Las contraseñas de demostración y las sesiones anteriores quedan invalidadas. Las cuentas guardadas únicamente en el navegador deben registrarse en la aplicación. Un perfil anterior sin cuenta puede vincularse desde el registro al verificar el correo y usar el mismo DNI. Para corregir datos de perfiles existentes, comunícate con la clínica. Los registros de mascotas y los carnets ya almacenados se conservan.
 
@@ -40,7 +42,7 @@ Las contraseñas de demostración y las sesiones anteriores quedan invalidadas. 
 - Los gráficos consultan MySQL y muestran mascotas registradas, distribución por especie y, para Administrador y Veterinario, consultas atendidas y dosis aplicadas en periodos de 7 días u 8 semanas. Los cortes diarios usan la hora de Perú.
 - Los reportes activos aparecen en **Inicio → Mascotas extraviadas** desde que se activa el extravío. Recepción, Veterinario y Administrador ven el reporte aunque todavía no se haya recibido una ubicación GPS.
 - En **Vacunas → Registrar lote**, ingresa el nombre de la vacuna, el lote del fabricante, su vencimiento y las dosis recibidas. Al aplicar una dosis, el carnet y las existencias se actualizan en la misma transacción. Las dosis anteriores conservan sus registros y el número de lote consignado originalmente.
-- Para cargar una base nueva, crea la primera cuenta administradora, registra un propietario por correo, registra su mascota y carga los lotes de inventario de la clínica. El archivo `backend/database.sql` incluye el esquema y el catálogo de razas. Si una instalación anterior importó ejemplos, esas filas siguen en la base correspondiente.
+- Para cargar una base nueva, crea la primera cuenta administradora, desde **Propietarios → Registrar propietario** guarda los datos de un cliente, registra su mascota y carga los lotes de la clínica. La cuenta del portal se vincula cuando el cliente verifica el mismo correo y DNI en el registro público. El archivo `backend/database.sql` incluye el esquema y el catálogo de razas. Si una instalación anterior importó ejemplos, esas filas siguen en la base correspondiente.
 
 ### IA y mensajería
 
@@ -50,7 +52,7 @@ Configura `CLINIC_PHONE`, `CLINIC_WHATSAPP` y `CLINIC_ADDRESS` con los datos pú
 
 ### Base de datos existente y verificación de correo
 
-Al arrancar, el backend aplica la migración sobre la base indicada por `DB_NAME`. Conserva las filas y actualiza las columnas de usuarios, propietarios y carnet de vacunación. El usuario MySQL debe poder ejecutar `CREATE` y `ALTER`. Guarda una copia de la base antes de actualizar un entorno con datos reales. Para el renombre de la clave del carnet se requiere MySQL 8 o una versión compatible con `RENAME COLUMN`.
+Al arrancar, el backend aplica la migración sobre la base indicada por `DB_NAME`. Conserva las filas y actualiza las columnas de usuarios, propietarios y carnet de vacunación. Si faltaban columnas de fecha, la migración las agrega y conserva vacías las fechas que el esquema anterior no registró. El usuario MySQL debe poder ejecutar `CREATE` y `ALTER`. Guarda una copia de la base antes de actualizar un entorno con datos reales. Para el renombre de la clave del carnet se requiere MySQL 8 o una versión compatible con `RENAME COLUMN`.
 
 El registro público envía un código de seis dígitos mediante Resend. El código vence a los diez minutos. Tras cinco intentos fallidos, solicita otro. La cuenta y la sesión se crean al confirmar el código. Configura `RESEND_API_KEY` y `EMAIL_FROM` en `backend/.env`. Resend requiere un dominio verificado para enviar a cualquier destinatario. Su remitente de pruebas `onboarding@resend.dev` solo permite probar hacia el correo de tu cuenta de Resend. Conserva un `AUTH_SECRET` estable para que los códigos sigan siendo verificables tras reiniciar el backend. La opción **¿Olvidaste tu contraseña?** utiliza el mismo remitente de Resend. El código de recuperación vence a los diez minutos y, al guardar la nueva contraseña, se invalidan las sesiones anteriores de esa cuenta.
 

@@ -209,7 +209,7 @@ function PetQRCard({ codigo }) {
           </div>
         </div>
 
-        {/* SWITCH SIMULADOR */}
+        {/* ESTADO DE LA PLACA REGISTRADA */}
         <div style={{
           display: 'flex',
           flexDirection: 'column',
@@ -304,7 +304,7 @@ function PetQRCard({ codigo }) {
               </div>
 
               <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
-                <img
+                {pet.foto ? <img
                   src={pet.foto}
                   alt={pet.nombre}
                   style={{
@@ -316,7 +316,7 @@ function PetQRCard({ codigo }) {
                     marginBottom: '0.6rem',
                     boxShadow: '0 8px 25px rgba(239, 68, 68, 0.35)'
                   }}
-                />
+                /> : <Icon name="paw" size={42} />}
                 <h2 style={{ fontSize: '1.8rem', fontWeight: 900, color: '#FFFFFF', margin: 0 }}>
                   {pet.nombre}
                 </h2>
@@ -526,7 +526,7 @@ function PetQRCard({ codigo }) {
               </div>
 
               <div style={{ textAlign: 'center', marginBottom: '1.4rem' }}>
-                <img
+                {pet.foto ? <img
                   src={pet.foto}
                   alt={pet.nombre}
                   style={{
@@ -538,7 +538,7 @@ function PetQRCard({ codigo }) {
                     marginBottom: '0.6rem',
                     boxShadow: '0 10px 25px rgba(0,0,0,0.4)'
                   }}
-                />
+                /> : <Icon name="paw" size={42} />}
                 <h2 style={{ fontSize: '1.85rem', fontWeight: 900, color: '#FFFFFF', margin: 0 }}>
                   {pet.nombre}
                 </h2>
@@ -750,7 +750,7 @@ function PetQRCard({ codigo }) {
                 </strong>
               </div>
               <span style={{ fontSize: '0.72rem', color: '#10B981', fontWeight: 700 }}>
-                {pet.vacunas?.length || 0} Vacunas al día
+                {pet.vacunas?.length || 0} dosis registradas
               </span>
             </div>
 
@@ -772,23 +772,23 @@ function PetQRCard({ codigo }) {
                     <div>
                       <strong style={{ color: '#FFFFFF', display: 'block' }}>{vax.nombre}</strong>
                       <span style={{ color: '#94A3B8', fontSize: '0.72rem' }}>
-                        Aplicada: {vax.fecha} · Refuerzo: {vax.proxima || 'Anual'}
+                        Aplicada: {vax.fecha} · Refuerzo: {vax.proxima || 'Sin fecha registrada'}
                       </span>
                     </div>
                     <span style={{
                       fontSize: '0.7rem',
                       fontWeight: 700,
-                      color: '#10B981',
-                      background: 'rgba(16, 185, 129, 0.15)',
+                      color: vax.estado === 'Vigente' ? '#10B981' : '#FBBF24',
+                      background: 'rgba(255,255,255,0.05)',
                       padding: '0.2rem 0.5rem',
                       borderRadius: '6px'
                     }}>
-                      ✓ {vax.estado || 'Vigente'}
+                      {vax.estado || 'Sin estado registrado'}
                     </span>
                   </div>
                 ))
               ) : (
-                <div style={{ fontSize: '0.78rem', color: '#94A3B8' }}>Registro inicial en proceso.</div>
+                <div style={{ fontSize: '0.78rem', color: '#94A3B8' }}>Esta mascota todavía no tiene dosis registradas.</div>
               )}
             </div>
           </div>

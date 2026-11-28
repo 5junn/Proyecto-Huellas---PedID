@@ -17,6 +17,7 @@ test('Las rutas privadas rechazan solicitudes sin una sesión de la API', async 
   const privateRoutes = [
     ['GET', '/auth/me'],
     ['GET', '/auth/propietarios'],
+    ['POST', '/auth/propietarios'],
     ['POST', '/auth/staff'],
     ['GET', '/auth/usuarios'],
     ['GET', '/clinica/lotes-vacunas'],
