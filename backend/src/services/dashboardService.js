@@ -33,7 +33,11 @@ async function loadDashboard(clinical) {
     });
     await read('Distribución por especie', async () => {
       const [rows] = await conn.query(
-        'SELECT especie, COUNT(*) AS cantidad FROM mascotas GROUP BY especie ORDER BY especie'
+        `SELECT COALESCE(m.especie, r.especie) AS especie, COUNT(*) AS cantidad
+         FROM mascotas m
+         LEFT JOIN razas r ON r.id_raza = m.id_raza
+         GROUP BY COALESCE(m.especie, r.especie)
+         ORDER BY especie`
       );
       response.especies = rows;
     });

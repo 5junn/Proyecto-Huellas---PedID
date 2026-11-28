@@ -17,10 +17,10 @@ export default function LostPetReports({ pets, status }) {
             <li className="row" key={pet.id_mascota}>
               <span className="avatar"><Icon name="alert" size={16} /></span>
               <div className="row-text">
-                <strong>{pet.nombre} · {pet.codigoQR}</strong>
-                <span>{pet.raza || pet.especie} · {pet.propietario}</span>
+                <strong>{pet.nombre} · {pet.codigoQR || 'Sin placa registrada'}</strong>
+                <span>{[pet.raza || pet.especie, pet.propietario].filter(Boolean).join(' · ')}</span>
               </div>
-              <Link className="btn btn-outline sm" to={`/pet/${encodeURIComponent(pet.codigoQR)}`}>Ver ficha QR</Link>
+              {pet.codigoQR && <Link className="btn btn-outline sm" to={`/pet/${encodeURIComponent(pet.codigoQR)}`}>Ver ficha QR</Link>}
             </li>
           ))}
         </ul>

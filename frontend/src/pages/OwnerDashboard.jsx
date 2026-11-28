@@ -98,7 +98,7 @@ export default function OwnerDashboard({ user }) {
     if (!pet) return;
     setActionError('');
     try {
-      const { estadoExtravio } = await apiFetch(`/mascotas/${encodeURIComponent(pet.codigoQR)}/extravio`, {
+      const { estadoExtravio } = await apiFetch(`/mascotas/${encodeURIComponent(pet.codigoQR || pet.id_mascota)}/extravio`, {
         method: 'PATCH',
         body: JSON.stringify({ estadoExtravio: !pet.estadoExtravio }),
       });
@@ -314,11 +314,7 @@ export default function OwnerDashboard({ user }) {
           {mascotas.filter((m) => m.estadoExtravio).length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginBottom: '1.5rem' }}>
               {mascotas.filter((m) => m.estadoExtravio).map((lostPet) => {
-                const petGps = gpsAlerts.find(
-                  (a) =>
-                    a.codigoMascota &&
-                    a.codigoMascota.toUpperCase() === (lostPet.codigoQR || lostPet.id || '').toUpperCase()
-                );
+                const petGps = gpsAlerts.find((alert) => alert.id_mascota === lostPet.id_mascota);
                 return (
                   <div
                     key={lostPet.id || lostPet.codigoQR}
@@ -345,7 +341,7 @@ export default function OwnerDashboard({ user }) {
                             🚨 ¡PROTOCOLO DE EXTRAVÍO ACTIVO: {lostPet.nombre.toUpperCase()}!
                           </strong>
                           <span style={{ fontSize: '0.82rem', color: '#FECACA' }}>
-                            {lostPet.especie} · {lostPet.raza} · Placa: <strong>{lostPet.codigoQR || lostPet.id}</strong>
+                            {lostPet.especie} · {lostPet.raza} · Placa: <strong>{lostPet.codigoQR || 'Sin placa registrada'}</strong>
                           </span>
                         </div>
                       </div>
@@ -363,7 +359,9 @@ export default function OwnerDashboard({ user }) {
                     </div>
 
                     <p style={{ margin: 0, fontSize: '0.84rem', color: '#F3F4F6', lineHeight: 1.5 }}>
-                      La placa QR del collar de <strong>{lostPet.nombre}</strong> está transmitiendo la pantalla roja de auxilio con tus números telefónicos de contacto directo ({user.telefono || 'sin teléfono registrado'}) para llamada inmediata de rescate.
+                      {lostPet.codigoQR
+                        ? 'La ficha QR muestra el reporte de extravío y el contacto de rescate registrado.'
+                        : 'El personal de la clínica puede ver el reporte de extravío.'}
                     </p>
 
                     {petGps && (
@@ -383,8 +381,8 @@ export default function OwnerDashboard({ user }) {
                     )}
 
                     <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.3rem' }}>
-                      <Link
-                        to={`/pet/${lostPet.codigoQR || lostPet.id}`}
+                      {lostPet.codigoQR && <Link
+                        to={`/pet/${encodeURIComponent(lostPet.codigoQR)}`}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
@@ -400,7 +398,7 @@ export default function OwnerDashboard({ user }) {
                       >
                         <Icon name="qr" size={16} />
                         <span>Ver Ficha QR de Rescate</span>
-                      </Link>
+                      </Link>}
 
                       <button
                         onClick={() => toggleModoExtravio(lostPet.id)}
@@ -510,7 +508,7 @@ export default function OwnerDashboard({ user }) {
                     <div className="hp-pet-meta">
                       <div className="hp-pet-name-row">
                         <h3>{pet.nombre}</h3>
-                        <span className="hp-qr-code-pill">Placa {pet.codigoQR}</span>
+                        <span className="hp-qr-code-pill">{pet.codigoQR || 'Sin placa registrada'}</span>
                       </div>
                       <span className="hp-pet-sub">
                         {pet.especie} · {pet.raza} · {pet.sexo}
@@ -591,7 +589,7 @@ export default function OwnerDashboard({ user }) {
                     <div className="hp-lost-toggle-box">
                       <div className="hp-lost-toggle-text">
                         <strong>Modo Mascota Extraviada</strong>
-                        <span>Muestra alerta roja y teléfonos de emergencia al escanear</span>
+                        <span>{pet.codigoQR ? 'Muestra el reporte y el contacto de rescate en la ficha QR' : 'El reporte se muestra en el panel de la clínica'}</span>
                       </div>
                       <button
                         type="button"
@@ -693,7 +691,7 @@ export default function OwnerDashboard({ user }) {
                 {selectedPet.foto ? <img src={selectedPet.foto} alt={selectedPet.nombre} className="hp-carnet-avatar" /> : <Icon name="paw" size={28} />}
                 <div>
                   <h4>{selectedPet.nombre} ({selectedPet.raza})</h4>
-                  <p>Código de Trazabilidad: <strong>{selectedPet.codigoQR}</strong></p>
+                  <p>Código de Trazabilidad: <strong>{selectedPet.codigoQR || 'Sin placa registrada'}</strong></p>
                   <p>Propietario Responsable: <strong>{user.nombres}</strong></p>
                 </div>
               </div>

@@ -311,11 +311,13 @@ router.get('/propietarios', requireSession, allowRoles(RECEPTION_ROLES), async (
   try {
     const [propietarios] = await db.queryAsync(
       `SELECT p.*, owner.estado AS cuenta_estado,
-        GROUP_CONCAT(CONCAT(m.nombre, ' (', COALESCE(m.raza, m.especie), ')') SEPARATOR ' | ') AS mascotas_texto,
+        GROUP_CONCAT(CONCAT(m.nombre, COALESCE(CONCAT(' (', COALESCE(r.nombre_raza, m.raza, m.especie, r.especie), ')'), ''))
+                     SEPARATOR ' | ') AS mascotas_texto,
         COUNT(m.id_mascota) AS total_mascotas
        FROM propietarios p
        LEFT JOIN usuarios owner ON owner.id_usuario = p.id_usuario AND owner.rol = 'Propietario'
        LEFT JOIN mascotas m ON m.id_propietario = p.id_propietario
+       LEFT JOIN razas r ON r.id_raza = m.id_raza
        GROUP BY p.id_propietario
        ORDER BY p.id_propietario DESC`
     );
