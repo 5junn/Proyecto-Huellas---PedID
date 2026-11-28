@@ -23,7 +23,7 @@ El proyecto está desarrollado bajo una arquitectura web moderna:
 
 ## Conexión de la aplicación
 
-- Configura MySQL en el backend con las variables de `backend/.env.example`. También se aceptan `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD` y `MYSQLDATABASE` de Railway. Mantén un `AUTH_SECRET` aleatorio y estable en Railway. Si el backend recibe tráfico por un proxy, ajusta `TRUST_PROXY_HOPS` al número de saltos de confianza para aplicar los límites por cliente.
+- Para trabajar en local, copia `backend/.env.example` a `backend/.env` y configura MySQL allí. Deja el archivo de ejemplo sin contraseñas ni claves. También se aceptan `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD` y `MYSQLDATABASE` de Railway. Mantén un `AUTH_SECRET` aleatorio y estable en Railway. Si el backend recibe tráfico por un proxy, ajusta `TRUST_PROXY_HOPS` al número de saltos de confianza para aplicar los límites por cliente.
 - Inicia el backend desde `backend` con `npm ci` y `npm start`. El servicio prepara las tablas en la base configurada. `GET /` informa si MySQL responde.
 - Usa `frontend` como directorio raíz de Vercel. Define `VITE_API_URL` con la URL HTTPS del servicio de Railway y vuelve a desplegar el frontend después de modificarla. En desarrollo, Vite usa `http://localhost:4000` si falta esa variable.
 

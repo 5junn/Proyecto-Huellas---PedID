@@ -1,5 +1,3 @@
-require('dotenv').config();
-
 const db = require('../src/db');
 const { initDatabase } = require('../src/dbInit');
 const { hashPassword, isValidEmail, sanitizeText } = require('../src/utils/security');
