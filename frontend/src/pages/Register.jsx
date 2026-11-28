@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import AuthLayout from '../components/AuthLayout';
 import PasswordInput from '../components/PasswordInput';
+import VerificationCodeInput from '../components/VerificationCodeInput';
 import Icon from '../components/Icon';
 import { registrarUsuarioPropietario, solicitarCodigoRegistro } from '../services/authService';
 
@@ -81,27 +82,24 @@ export default function Register() {
         </div>
       )}
 
-      {notice && <p role="status">{notice}</p>}
+      {notice && <p className="auth-code-notice" role="status">{notice}</p>}
       {awaitingCode ? (
         <form className="auth-form" onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="codigo">Código de seis dígitos</label>
-            <input id="codigo" className="form-input" inputMode="numeric" autoComplete="one-time-code"
-              pattern="[0-9]{6}" maxLength={6} required value={codigo}
-              onChange={(event) => setCodigo(event.target.value.replace(/[^0-9]/g, ''))} />
-          </div>
+          <VerificationCodeInput value={codigo} onChange={setCodigo} disabled={loading} />
           <button type="submit" className="btn-primary-gradient" disabled={loading}>
             {loading ? 'Verificando…' : 'Verificar y crear cuenta'}
           </button>
-          <button type="button" className="portal-tab-btn" disabled={loading} onClick={() => sendCode()}>
-            Reenviar código
-          </button>
-          <button type="button" className="portal-tab-btn" disabled={loading} onClick={() => {
-            setAwaitingCode(false);
-            setCodigo('');
-            setError('');
-            setNotice('');
-          }}>Cambiar correo o datos</button>
+          <div className="auth-code-actions">
+            <button type="button" className="portal-tab-btn" disabled={loading} onClick={() => sendCode()}>
+              Reenviar código
+            </button>
+            <button type="button" className="portal-tab-btn" disabled={loading} onClick={() => {
+              setAwaitingCode(false);
+              setCodigo('');
+              setError('');
+              setNotice('');
+            }}>Cambiar correo o datos</button>
+          </div>
         </form>
       ) : (
         <form className="auth-form" onSubmit={sendCode}>

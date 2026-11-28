@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
+import PasswordReset from './pages/PasswordReset';
 import Register from './pages/Register';
 import RegisterPet from './pages/RegisterPet';
 import Dashboard from './pages/Dashboard';
@@ -23,6 +24,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/recuperar-contrasena" element={<PasswordReset />} />
         <Route path="/register" element={<Register />} />
         <Route path="/registrar-mascota" element={<RequireSession page={RegisterPet} />} />
         <Route path="/registro-mascota" element={<RequireSession page={RegisterPet} />} />

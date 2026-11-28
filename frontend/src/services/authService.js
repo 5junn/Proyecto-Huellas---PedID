@@ -55,6 +55,22 @@ export async function registrarUsuarioPropietario({ nombres, dni, telefono, corr
   return saveSession(data, ROLES_USUARIOS);
 }
 
+export function solicitarCodigoRecuperacion(correo) {
+  return apiFetch('/auth/password-reset/code', {
+    authenticated: false,
+    method: 'POST',
+    body: JSON.stringify({ correo: correo.trim().toLowerCase() }),
+  });
+}
+
+export function restablecerContrasena({ correo, codigo, password }) {
+  return apiFetch('/auth/password-reset', {
+    authenticated: false,
+    method: 'POST',
+    body: JSON.stringify({ correo: correo.trim().toLowerCase(), codigo, password }),
+  });
+}
+
 export async function refreshSession(signal) {
   const { usuario } = await apiFetch('/auth/me', { signal });
   localStorage.setItem('huellas_user', JSON.stringify(usuario));

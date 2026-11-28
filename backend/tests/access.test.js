@@ -2,7 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { once } = require('node:events');
 const app = require('../index');
-const { DEMO_SEED_HASH, verifyPassword } = require('../src/utils/security');
+const db = require('../src/db');
+const { DEMO_SEED_HASH, signToken, verifyPassword } = require('../src/utils/security');
 
 test('La contraseña de la cuenta de demostración está deshabilitada', () => {
   assert.equal(verifyPassword('password123', DEMO_SEED_HASH), false);
@@ -53,4 +54,32 @@ test('El registro público requiere un código de correo', async (t) => {
   const data = await response.json();
   assert.match(data.message, /código de seis dígitos/);
   assert.equal(data.token, undefined);
+});
+
+
+test('Una sesión emitida antes del cambio de contraseña queda revocada', async (t) => {
+  const account = {
+    id_usuario: 23,
+    correo: 'propietario@example.invalid',
+    nombres: 'Propietario de prueba',
+    rol: 'Propietario',
+    id_propietario: 19,
+    version_sesion: 1,
+  };
+  t.mock.method(db, 'queryAsync', async () => [[account]]);
+  const server = app.listen(0, '127.0.0.1');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  await once(server, 'listening');
+
+  const url = `http://127.0.0.1:${server.address().port}/api/auth/me`;
+  const previous = signToken({ id: account.id_usuario, sessionVersion: 2 });
+  const current = signToken({ id: account.id_usuario, sessionVersion: 2, revision: 1 });
+
+  const expiredSession = await fetch(url, { headers: { Authorization: `Bearer ${previous}` } });
+  assert.equal(expiredSession.status, 401);
+  await expiredSession.json();
+
+  const validSession = await fetch(url, { headers: { Authorization: `Bearer ${current}` } });
+  assert.equal(validSession.status, 200);
+  assert.equal((await validSession.json()).usuario.id, account.id_usuario);
 });
