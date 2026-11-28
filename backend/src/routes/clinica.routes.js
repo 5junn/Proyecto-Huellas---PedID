@@ -22,8 +22,12 @@ async function resolvePetRow({ id_mascota, codigo_qr, petName }) {
     value = sanitizeText(codigo_qr, 50);
   }
   const [rows] = await db.queryAsync(
-    `SELECT m.*, p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
-     FROM mascotas m INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
+    `SELECT m.id_mascota, m.nombre, m.id_propietario, m.alergias,
+            COALESCE(m.especie, r.especie) AS especie, COALESCE(r.nombre_raza, m.raza) AS raza,
+            p.nombres AS propietario_nombre, p.telefono AS propietario_telefono, p.correo AS propietario_correo
+     FROM mascotas m
+     INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
+     LEFT JOIN razas r ON r.id_raza = m.id_raza
      WHERE ${clause} LIMIT 2`,
     [value]
   );
@@ -55,7 +59,7 @@ router.get('/dashboard', allowRoles(STAFF_ROLES), async (req, res) => {
 router.get('/consultas', clinicalOnly, async (req, res) => {
   try {
     const [rows] = await db.queryAsync(
-      `SELECT c.*, m.nombre AS pet, COALESCE(r.nombre_raza, m.raza, m.especie) AS breed,
+      `SELECT c.*, m.nombre AS pet, COALESCE(r.nombre_raza, m.raza, m.especie, r.especie) AS breed,
               m.codigo_qr, p.nombres AS owner, p.telefono AS owner_phone
        FROM consultas_historial c
        INNER JOIN mascotas m ON c.id_mascota = m.id_mascota
@@ -234,12 +238,13 @@ router.post('/lotes-vacunas', clinicalOnly, async (req, res) => {
 router.get('/vacunas', clinicalOnly, async (req, res) => {
   try {
     const [rows] = await db.queryAsync(
-      `SELECT cv.*, m.nombre AS pet, m.codigo_qr, m.especie, p.id_propietario,
+      `SELECT cv.*, m.nombre AS pet, m.codigo_qr, COALESCE(m.especie, r.especie) AS especie, p.id_propietario,
               DATE_FORMAT(cv.fecha_aplicacion, '%Y-%m-%d') AS aplicada_el,
               DATE_FORMAT(cv.fecha_proximo_refuerzo, '%Y-%m-%d') AS refuerzo_el,
               p.nombres AS owner, p.telefono AS owner_phone, p.correo AS owner_email
        FROM carnet_vacunacion cv
        INNER JOIN mascotas m ON cv.id_mascota = m.id_mascota
+       LEFT JOIN razas r ON r.id_raza = m.id_raza
        INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
        ORDER BY cv.fecha_proximo_refuerzo ASC, cv.id_vacunacion DESC`
     );

@@ -28,7 +28,7 @@ export default function DashboardCharts({ metrics, clinical, status }) {
   });
   const totalPets = (metrics.especies || []).reduce((total, { cantidad }) => total + Number(cantidad), 0);
   const species = (metrics.especies || []).map(({ especie, cantidad }, index) => ({
-    name: especie,
+    name: especie || 'Sin especie registrada',
     count: Number(cantidad),
     value: Number(cantidad) / totalPets * 100,
     color: COLORS[index % COLORS.length],

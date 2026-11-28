@@ -56,6 +56,7 @@ router.get('/', petAccess, async (req, res) => {
       SELECT
         m.*,
         COALESCE(r.nombre_raza, m.raza) AS raza_nombre,
+        COALESCE(m.especie, r.especie) AS especie_registrada,
         p.nombres AS propietario_nombre,
         p.telefono AS propietario_telefono,
         p.correo AS propietario_correo,
@@ -76,7 +77,7 @@ router.get('/', petAccess, async (req, res) => {
       params.push(propIdFilter);
     }
     if (especieFilter && especieFilter !== 'all') {
-      sql += ' AND m.especie = ?';
+      sql += ' AND COALESCE(m.especie, r.especie) = ?';
       params.push(mapSpeciesToDb(especieFilter));
     }
 
@@ -106,7 +107,8 @@ router.get('/', petAccess, async (req, res) => {
       ...m,
       id: m.codigo_qr || `hp-${m.id_mascota}`,
       codigoQR: m.codigo_qr,
-      raza: m.raza_nombre || m.raza,
+      raza: m.raza_nombre,
+      especie: m.especie_registrada,
       peso: m.peso_actual ? `${m.peso_actual} kg` : 'N/A',
       foto: m.foto_url,
       propietario: m.propietario_nombre,
@@ -129,9 +131,11 @@ router.get('/', petAccess, async (req, res) => {
 router.get('/reportes/extravios', requireSession, allowRoles(STAFF_ROLES), async (req, res) => {
   try {
     const [rows] = await db.queryAsync(
-      `SELECT m.id_mascota, m.codigo_qr AS codigoQR, m.nombre, m.especie, m.raza,
+      `SELECT m.id_mascota, m.codigo_qr AS codigoQR, m.nombre,
+              COALESCE(m.especie, r.especie) AS especie, COALESCE(r.nombre_raza, m.raza) AS raza,
               p.nombres AS propietario
        FROM mascotas m
+       LEFT JOIN razas r ON r.id_raza = m.id_raza
        INNER JOIN propietarios p ON p.id_propietario = m.id_propietario
        WHERE m.modo_extraviado = 1
        ORDER BY m.id_mascota DESC`
@@ -151,9 +155,11 @@ router.get('/alertas-gps', petAccess, async (req, res) => {
   try {
     const ownerId = ownerScope(req.user);
     const [rows] = await db.queryAsync(
-      `SELECT a.*, m.nombre AS nombreMascota, m.especie, m.raza, p.nombres AS propietario, p.telefono
+      `SELECT a.*, m.nombre AS nombreMascota, COALESCE(m.especie, r.especie) AS especie,
+              COALESCE(r.nombre_raza, m.raza) AS raza, p.nombres AS propietario, p.telefono
        FROM alertas_rescate_gps a
        INNER JOIN mascotas m ON a.id_mascota = m.id_mascota
+       LEFT JOIN razas r ON r.id_raza = m.id_raza
        INNER JOIN propietarios p ON m.id_propietario = p.id_propietario
        WHERE a.estado = 'activa'${ownerId ? ' AND m.id_propietario = ?' : ''}
        ORDER BY a.id_alerta DESC`,
@@ -223,6 +229,7 @@ router.get('/:codigo', async (req, res) => {
     const [rows] = await db.queryAsync(
       `SELECT m.*,
         COALESCE(r.nombre_raza, m.raza) AS raza_nombre,
+        COALESCE(m.especie, r.especie) AS especie_registrada,
         p.nombres AS propietario_nombre,
         p.telefono AS propietario_telefono,
         p.direccion AS propietario_direccion
@@ -253,7 +260,7 @@ router.get('/:codigo', async (req, res) => {
       codigo: m.codigo_qr,
       codigoQR: m.codigo_qr,
       nombre: m.nombre,
-      especie: m.especie,
+      especie: m.especie_registrada,
       raza: m.raza_nombre,
       edad: m.edad || 'Sin registrar',
       sexo: m.sexo,
@@ -406,7 +413,7 @@ router.patch('/:id/extravio', petAccess, async (req, res) => {
       [Number(nuevoEstado), pet.id_mascota, pet.id_propietario, Number(nuevoEstado)]
     );
 
-    if (result.affectedRows && nuevoEstado && pet.propietario_telefono) {
+    if (result.affectedRows && nuevoEstado && pet.codigo_qr && pet.propietario_telefono) {
       sendLostPetAlert({
         id_mascota: pet.id_mascota,
         id_propietario: pet.id_propietario,

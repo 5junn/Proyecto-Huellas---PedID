@@ -401,7 +401,7 @@ export default function Dashboard({ user: currentUser }) {
   };
   const patientOptions = mascotas.map((pet) => (
     <option key={pet.id_mascota} value={pet.id_mascota}>
-      {pet.nombre} · {pet.codigoQR} · {pet.propietario}
+      {pet.nombre} · {pet.codigoQR || 'Sin placa'} · {pet.propietario}
     </option>
   ));
 
@@ -551,9 +551,9 @@ export default function Dashboard({ user: currentUser }) {
                         <span>Mascota Extraviada: {lostPet.nombre}</span>
                       </div>
                       <p style={{ margin: '0.3rem 0 0.5rem', fontSize: '0.76rem', color: '#CBD5E1' }}>
-                        Placa {lostPet.codigoQR} · Dueño: {lostPet.propietario}
+                        {lostPet.codigoQR ? `Placa ${lostPet.codigoQR}` : 'Sin placa registrada'} · Dueño: {lostPet.propietario}
                       </p>
-                      <Link
+                      {lostPet.codigoQR && <Link
                         to={`/pet/${lostPet.codigoQR}`}
                         onClick={() => setModalAlertasOpen(false)}
                         style={{
@@ -565,7 +565,7 @@ export default function Dashboard({ user: currentUser }) {
                         }}
                       >
                         Ver Ficha QR de Rescate →
-                      </Link>
+                      </Link>}
                     </div>
                   ))}
 
@@ -942,7 +942,7 @@ export default function Dashboard({ user: currentUser }) {
                           <td>
                             {isEditingAgenda ? (
                               <select
-                                value={c.status}
+                                value={c.status ?? ''}
                                 onChange={(e) => handleChangeConsultaStatus(c.id || c.pet, e.target.value)}
                                 style={{
                                   padding: '0.28rem 0.6rem',
@@ -956,6 +956,7 @@ export default function Dashboard({ user: currentUser }) {
                                   outline: 'none'
                                 }}
                               >
+                                <option value="" disabled>Sin estado registrado</option>
                                 <option value="waiting" style={{ background: '#1F2937' }}>⏳ En espera</option>
                                 <option value="progress" style={{ background: '#1F2937' }}>⚡ En curso</option>
                                 <option value="done" style={{ background: '#1F2937' }}>✓ Atendida</option>
@@ -974,7 +975,7 @@ export default function Dashboard({ user: currentUser }) {
                                   color: c.status === 'done' ? '#34D399' : c.status === 'progress' ? '#FBBF24' : '#F87171'
                                 }}
                               >
-                                {c.status === 'done' ? '✓ Atendida' : c.status === 'progress' ? '⚡ En curso' : '⏳ En espera'}
+                                {STATUS_TEXT[c.status] || 'Sin estado registrado'}
                               </span>
                             )}
                           </td>
@@ -1162,9 +1163,9 @@ export default function Dashboard({ user: currentUser }) {
                               </div>
                             </div>
                           </td>
-                          <td>{m.especie} · {m.raza}</td>
+                          <td>{[m.especie, m.raza].filter(Boolean).join(' · ') || 'Sin especie registrada'}</td>
                           <td>{m.propietario}</td>
-                          <td><span className="mgmt-qr-tag">{m.codigoQR}</span></td>
+                          <td><span className="mgmt-qr-tag">{m.codigoQR || 'Sin placa'}</span></td>
                           <td><span style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{m.chip}</span></td>
                           <td>
                             <span className="mgmt-badge ok">
@@ -1172,10 +1173,10 @@ export default function Dashboard({ user: currentUser }) {
                             </span>
                           </td>
                           <td>
-                            <Link to={`/pet/${m.codigoQR}`} className="btn-staff-secondary" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
+                            {m.codigoQR && <Link to={`/pet/${m.codigoQR}`} className="btn-staff-secondary" style={{ padding: '0.35rem 0.8rem', fontSize: '0.75rem' }}>
                               <Icon name="qr" size={13} />
                               <span>Ver Placa</span>
-                            </Link>
+                            </Link>}
                           </td>
                         </tr>
                       ))}
@@ -1239,10 +1240,7 @@ export default function Dashboard({ user: currentUser }) {
                   <tbody>
                     {consultas
                       .filter((c) => {
-                        const match =
-                          c.pet.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          c.reason.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          c.owner.toLowerCase().includes(searchTerm.toLowerCase());
+                        const match = [c.pet, c.reason, c.owner].some((value) => value?.toLowerCase().includes(search));
                         const matchF = statusFilter === 'all' || c.status === statusFilter;
                         return match && matchF;
                       })
@@ -1259,7 +1257,7 @@ export default function Dashboard({ user: currentUser }) {
                           <td>{c.vet}</td>
                           <td>
                             <select
-                              value={c.status}
+                              value={c.status ?? ''}
                               onChange={(e) => handleChangeConsultaStatus(c.id || c.pet, e.target.value)}
                               style={{
                                 padding: '0.3rem 0.65rem',
@@ -1273,6 +1271,7 @@ export default function Dashboard({ user: currentUser }) {
                                 outline: 'none'
                               }}
                             >
+                              <option value="" disabled>Sin estado registrado</option>
                               <option value="waiting" style={{ background: '#1F2937' }}>⏳ En espera</option>
                               <option value="progress" style={{ background: '#1F2937' }}>⚡ En curso</option>
                               <option value="done" style={{ background: '#1F2937' }}>✓ Atendida</option>
