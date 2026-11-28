@@ -11,12 +11,13 @@ const REGISTRATION = {
   table: 'verificaciones_registro',
   template: registrationEmail,
 };
-const PASSWORD_RESET = {
+const RECOVERY_CODE = {
   scope: 'recuperacion',
   table: 'verificaciones_recuperacion',
   template: passwordResetEmail,
 };
 
+// Firma el código temporal con el secreto del servidor.
 function digest(scope, correo, nonce, code, binding) {
   const data = [scope, correo, nonce, code];
   // Preserva los códigos de registro emitidos antes de la actualización.
@@ -103,6 +104,6 @@ module.exports = {
   emailCodesConfigured,
   requestRegistrationCode: (correo) => requestEmailCode(REGISTRATION, correo),
   verifyRegistrationCode: (conn, correo, code) => verifyEmailCode(REGISTRATION, conn, correo, code),
-  requestPasswordResetCode: (correo, account) => requestEmailCode(PASSWORD_RESET, correo, accountBinding(account)),
-  verifyPasswordResetCode: (conn, correo, code, account) => verifyEmailCode(PASSWORD_RESET, conn, correo, code, accountBinding(account)),
+  requestPasswordResetCode: (correo, account) => requestEmailCode(RECOVERY_CODE, correo, accountBinding(account)),
+  verifyPasswordResetCode: (conn, correo, code, account) => verifyEmailCode(RECOVERY_CODE, conn, correo, code, accountBinding(account)),
 };
