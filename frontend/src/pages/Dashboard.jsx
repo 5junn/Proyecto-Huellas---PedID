@@ -4,6 +4,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { logout } from '../services/authService';
 import Logo from '../components/Logo';
 import Icon from '../components/Icon';
+import ReceptionOverview from '../components/ReceptionOverview';
 import { BarChart, Donut } from '../components/Charts';
 import { getRazasPorEspecie } from '../data/razasData';
 import { apiFetch } from '../services/apiClient';
@@ -33,7 +34,7 @@ const MENU = [
   {
     group: 'Administración',
     items: [
-      { id: 'usuarios', icon: 'user', label: 'Usuarios Staff', roles: ['Administrador'] },
+      { id: 'usuarios', icon: 'user', label: 'Personal clínico', roles: ['Administrador'] },
     ]
   },
 ];
@@ -82,7 +83,7 @@ export default function Dashboard({ user: currentUser }) {
   const [personal, setPersonal] = useState([]);
   const [gpsAlerts, setGpsAlerts] = useState([]);
   const [metrics, setMetrics] = useState(null);
-  const [loadError, setLoadError] = useState('');
+  const [loadErrors, setLoadErrors] = useState([]);
   const [pending, setPending] = useState(true);
 
   const [predictiveAlerts, setPredictiveAlerts] = useState(null);
@@ -100,20 +101,30 @@ export default function Dashboard({ user: currentUser }) {
 
   const loadAllFromBackend = React.useCallback(async (signal) => {
     const requests = [
-      ['/clinica/dashboard', setMetrics],
-      ['/mascotas', setMascotas],
-      ['/mascotas/alertas-gps', setGpsAlerts],
+      ['/mascotas', 'Mascotas', setMascotas],
+      ['/mascotas/alertas-gps', 'Alertas GPS', setGpsAlerts],
     ];
-    if (clinical) requests.push(['/clinica/consultas', setConsultas], ['/clinica/vacunas', setVacunas]);
-    if (reception) requests.push(['/auth/propietarios', setPropietarios], ['/mensajeria/recordatorios', setRecordatorios]);
-    if (isAdmin) requests.push(['/auth/staff', setPersonal]);
+    if (clinical) requests.push(
+      ['/clinica/dashboard', 'Resumen clínico', setMetrics],
+      ['/clinica/consultas', 'Consultas', setConsultas],
+      ['/clinica/vacunas', 'Vacunas', setVacunas]
+    );
+    if (reception) requests.push(
+      ['/auth/propietarios', 'Propietarios', setPropietarios],
+      ['/mensajeria/recordatorios', 'Recordatorios', setRecordatorios]
+    );
+    if (isAdmin) requests.push(['/auth/staff', 'Personal clínico', setPersonal]);
 
     const results = await Promise.allSettled(requests.map(([path]) => apiFetch(path, { signal })));
     if (signal?.aborted) return;
+
+    const errors = [];
     results.forEach((result, index) => {
-      if (result.status === 'fulfilled') requests[index][1](result.value);
+      const [path, label, setValue] = requests[index];
+      if (result.status === 'fulfilled') setValue(result.value);
+      else errors.push({ path, label, message: result.reason?.message || 'Error al cargar los datos.' });
     });
-    setLoadError(results.find((result) => result.status === 'rejected')?.reason.message || '');
+    setLoadErrors(errors);
     setToday(dateKey.format(new Date()));
     setPending(false);
   }, [clinical, reception, isAdmin]);
@@ -285,6 +296,24 @@ export default function Dashboard({ user: currentUser }) {
     setMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
+
+  const resourceStatus = (path) => {
+    if (pending) return 'loading';
+    return loadErrors.some((error) => error.path === path) ? 'error' : 'ready';
+  };
+
+  const activeOwners = propietarios.filter((owner) => owner.cuenta_estado === 'activo');
+  const search = searchTerm.trim().toLowerCase();
+  const visiblePets = mascotas.filter((pet) =>
+    (statusFilter === 'all' || pet.especie === statusFilter) &&
+    [pet.nombre, pet.codigoQR, pet.propietario, pet.raza].some((value) => value?.toLowerCase().includes(search))
+  );
+  const visibleOwners = propietarios.filter((owner) =>
+    [owner.nombres, owner.dni, owner.telefono].some((value) => String(value ?? '').toLowerCase().includes(search))
+  );
+  const visibleReminders = recordatorios.filter((reminder) =>
+    `${reminder.pet} ${reminder.owner}`.toLowerCase().includes(search)
+  );
 
   const kpis = [
     ['paw', 'sky', 'Mascotas registradas', metrics?.totales.mascotas],
@@ -602,7 +631,15 @@ export default function Dashboard({ user: currentUser }) {
 
         <div className="page">
           {pending && <p role="status">Cargando datos de la clínica…</p>}
-          {loadError && <p role="alert">{loadError} <button type="button" onClick={() => loadAllFromBackend()}>Reintentar</button></p>}
+          {loadErrors.length > 0 && (
+            <div className="staff-load-error" role="alert">
+              <strong>Algunos datos no se pudieron cargar.</strong>
+              <ul>
+                {loadErrors.map(({ path, label, message }) => <li key={path}>{label}: {message}</li>)}
+              </ul>
+              <button className="btn btn-outline sm" type="button" onClick={() => loadAllFromBackend()}>Reintentar</button>
+            </div>
+          )}
           {/* BANNER DINÁMICO DE ACCIÓN CLÍNICA SEGÚN ROL */}
           <section className="staff-action-banner">
             <div className="staff-action-info">
@@ -610,9 +647,11 @@ export default function Dashboard({ user: currentUser }) {
                 <Icon name={isVet ? 'doctor' : isRecep ? 'desk' : 'shield'} size={26} />
               </div>
               <div className="staff-action-text">
-                <h2>{SECTIONS[currentNav.id]?.title}</h2>
+                <h2>{isRecep && currentNav.id === 'inicio' ? 'Panel de Recepción' : SECTIONS[currentNav.id]?.title}</h2>
                 <p>
-                  Bienvenido, <strong>{currentUser.nombres}</strong> ({currentUser.rol}). {SECTIONS[currentNav.id]?.desc}
+                  Bienvenido, <strong>{currentUser.nombres}</strong> ({currentUser.rol}). {isRecep && currentNav.id === 'inicio'
+                    ? 'Consulta pacientes, propietarios y recordatorios.'
+                    : SECTIONS[currentNav.id]?.desc}
                 </p>
               </div>
             </div>
@@ -637,7 +676,10 @@ export default function Dashboard({ user: currentUser }) {
                     <Icon name="paw" size={16} />
                     <span>Registrar Paciente QR</span>
                   </button>
-
+                  <button type="button" className="btn-staff-secondary" onClick={() => go('propietarios')}>
+                    <Icon name="users" size={16} />
+                    <span>Ver propietarios</span>
+                  </button>
                 </>
               )}
 
@@ -649,7 +691,7 @@ export default function Dashboard({ user: currentUser }) {
                   </button>
                   <button className="btn-staff-secondary" onClick={() => go('usuarios')}>
                     <Icon name="shield" size={16} />
-                    <span>Auditoría de Roles</span>
+                    <span>Ver personal clínico</span>
                   </button>
                 </>
               )}
@@ -739,8 +781,18 @@ export default function Dashboard({ user: currentUser }) {
           {/* VISTA 1: INICIO (RESUMEN GENERAL) */}
           {currentNav.id === 'inicio' && (
             <>
-              {/* KPIS DE RENDIMIENTO CLÍNICO */}
-              <section className="kpis">
+              {isRecep && (
+                <ReceptionOverview
+                  mascotas={mascotas}
+                  propietarios={propietarios}
+                  recordatorios={recordatorios}
+                  gpsAlerts={gpsAlerts}
+                  status={resourceStatus}
+                  onOpenSection={go}
+                />
+              )}
+
+              {clinical && <section className="kpis">
                 {kpis.map(([icon, tone, label, value]) => (
                   <article className={`kpi tone-${tone}`} key={label}>
                     <span className="tile"><Icon name={icon} size={22} /></span>
@@ -748,7 +800,7 @@ export default function Dashboard({ user: currentUser }) {
                     <div className="kpi-foot"><span>{label}</span></div>
                   </article>
                 ))}
-              </section>
+              </section>}
 
               {/* ALERTA DE MASCOTA EXTRAVIADA DETECTADA (SOLO SI HAY MASCOTAS EN MODO PERDIDO) */}
               {mascotas.some((m) => m.estadoExtravio) && (
@@ -785,8 +837,8 @@ export default function Dashboard({ user: currentUser }) {
               )}
 
               {/* GRÁFICOS */}
-              <section className="grid-2-1">
-                {clinical && <article className="card">
+              {clinical && <section className="grid-2-1">
+                <article className="card">
                   <header className="card-head">
                     <div>
                       <h2>Consultas Médicas Atendidas</h2>
@@ -802,7 +854,7 @@ export default function Dashboard({ user: currentUser }) {
                     </div>
                   </header>
                   <BarChart key={chartRange} labels={labels} data={data} />
-                </article>}
+                </article>
 
                 <article className="card">
                   <header className="card-head">
@@ -822,7 +874,7 @@ export default function Dashboard({ user: currentUser }) {
                     ))}
                   </ul>
                 </article>
-              </section>
+              </section>}
 
               {/* ACTIVIDAD & VACUNAS POR VENCER */}
               {clinical && <section className="grid-2-1">
@@ -1120,16 +1172,12 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {mascotas
-                      .filter((m) => {
-                        const matchSearch =
-                          m.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          m.codigoQR.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (m.propietario || '').toLowerCase().includes(searchTerm.toLowerCase());
-                        const matchFilter = statusFilter === 'all' || m.especie === statusFilter;
-                        return matchSearch && matchFilter;
-                      })
-                      .map((m) => (
+                    {visiblePets.length === 0 && resourceStatus('/mascotas') === 'ready' && (
+                      <tr><td colSpan={7} className="staff-empty-state">
+                        {mascotas.length ? 'No encontramos mascotas con estos filtros.' : 'Todavía no hay mascotas registradas.'}
+                      </td></tr>
+                    )}
+                    {visiblePets.map((m) => (
                         <tr key={m.id}>
                           <td><code>{m.id}</code></td>
                           <td>
@@ -1362,13 +1410,12 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {propietarios
-                      .filter((p) =>
-                        p.nombres.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (p.dni || '').includes(searchTerm) ||
-                        (p.telefono || '').includes(searchTerm)
-                      )
-                      .map((p) => (
+                    {visibleOwners.length === 0 && resourceStatus('/auth/propietarios') === 'ready' && (
+                      <tr><td colSpan={6} className="staff-empty-state">
+                        {propietarios.length ? 'No encontramos propietarios con esa búsqueda.' : 'Aquí aparecerán los propietarios registrados en Huellas PetID.'}
+                      </td></tr>
+                    )}
+                    {visibleOwners.map((p) => (
                         <tr key={p.id_propietario}>
                           <td><strong style={{ color: '#FFFFFF' }}>{p.nombres}</strong></td>
                           <td><code>{p.dni}</code></td>
@@ -1432,7 +1479,12 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {recordatorios.filter((r) => `${r.pet} ${r.owner}`.toLowerCase().includes(searchTerm.toLowerCase())).map((r) => (
+                    {visibleReminders.length === 0 && resourceStatus('/mensajeria/recordatorios') === 'ready' && (
+                      <tr><td colSpan={8} className="staff-empty-state">
+                        {recordatorios.length ? 'No encontramos recordatorios con esa búsqueda.' : 'Todavía no hay recordatorios registrados.'}
+                      </td></tr>
+                    )}
+                    {visibleReminders.map((r) => (
                       <tr key={r.id}>
                         <td><code>{r.id}</code></td>
                         <td><strong style={{ color: '#FFFFFF' }}>{r.pet}</strong></td>
@@ -1475,7 +1527,7 @@ export default function Dashboard({ user: currentUser }) {
                     <span className="mgmt-search-icon"><Icon name="search" size={16} /></span>
                     <input
                       className="mgmt-search-input"
-                      placeholder="Buscar miembros del equipo..."
+                      placeholder="Buscar por nombre, correo o rol..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
@@ -1503,8 +1555,9 @@ export default function Dashboard({ user: currentUser }) {
                   <tbody>
                     {personal
                       .filter((u) =>
-                        u.nombres.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        u.correo.toLowerCase().includes(searchTerm.toLowerCase())
+                        u.nombres.toLowerCase().includes(search) ||
+                        u.correo.toLowerCase().includes(search) ||
+                        u.rol.toLowerCase().includes(search)
                       )
                       .map((u) => (
                         <tr key={u.id}>
@@ -1831,10 +1884,13 @@ export default function Dashboard({ user: currentUser }) {
                     <select className="staff-input-field" required value={formPet.id_propietario}
                       onChange={(event) => setFormPet({ ...formPet, id_propietario: event.target.value })}>
                       <option value="">Selecciona un propietario registrado</option>
-                      {propietarios.filter((owner) => owner.cuenta_estado === 'activo').map((owner) => (
+                      {activeOwners.map((owner) => (
                         <option key={owner.id_propietario} value={owner.id_propietario}>{owner.nombres} · {owner.correo}</option>
                       ))}
                     </select>
+                    {resourceStatus('/auth/propietarios') === 'ready' && activeOwners.length === 0 && (
+                      <p className="staff-empty-state">El propietario debe completar su registro antes de que puedas asignarle una mascota.</p>
+                    )}
                   </div>
                 </div>
 

@@ -29,6 +29,8 @@ El proyecto está desarrollado bajo una arquitectura web moderna:
 
 ### Cuentas de clínica
 
+Entra por **Personal Clínico** en el login. Con una cuenta administradora, el menú **Administración → Personal clínico** muestra las cuentas y permite buscarlas por nombre, correo o rol. Recepción tiene un inicio con mascotas, propietarios, recordatorios y alertas GPS de la base configurada.
+
 El registro público crea usuarios propietarios. Para crear el primer administrador, ejecuta `node scripts/provision-admin.js` desde `backend` con acceso autorizado a la base de datos y las variables `STAFF_ADMIN_NAME`, `STAFF_ADMIN_EMAIL` y `STAFF_ADMIN_PASSWORD`. La contraseña requiere al menos 12 caracteres. Para cambiar la contraseña de un administrador existente, usa el mismo script con `--reset-password`. Configura la contraseña por un canal seguro.
 
 Las contraseñas de demostración y las sesiones anteriores quedan invalidadas. Las cuentas guardadas únicamente en el navegador deben registrarse en la aplicación. Un perfil anterior sin cuenta puede vincularse desde el registro al verificar el correo y usar el mismo DNI. Para corregir datos de perfiles existentes, comunícate con la clínica. Los registros de mascotas y los carnets ya almacenados se conservan.
