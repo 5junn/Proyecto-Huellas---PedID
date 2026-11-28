@@ -18,12 +18,13 @@ export function Spark({ data }) {
   );
 }
 
-export function BarChart({ labels, data }) {
+export function BarChart({ labels, data, label }) {
   const maxVal = Math.max(...data);
-  const top = Math.ceil(maxVal / 10) * 10 || 10;
-  const ticks = [1, 0.75, 0.5, 0.25, 0].map((t) => Math.round(top * t));
+  const step = Math.max(1, Math.ceil(maxVal / 4));
+  const top = step * 4;
+  const ticks = [4, 3, 2, 1, 0].map((t) => t * step);
   return (
-    <div className="bars" role="img" aria-label="Gráfico de barras de consultas atendidas">
+    <div className="bars" role="img" aria-label={`${label}. ${labels.map((day, index) => `${day}: ${data[index]}`).join(", ")}`}>
       <div className="bars-y">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
       <div className="bars-plot">
         {data.map((v, i) => (
@@ -63,7 +64,7 @@ export function Donut({ parts, total, label }) {
             fill="none"
             style={{ stroke: p.color }}
             strokeWidth="5"
-            strokeDasharray={`${Math.max(0.5, p.value - 1.5)} ${100 - Math.max(0.5, p.value - 1.5)}`}
+            strokeDasharray={`${p.value} ${100 - p.value}`}
             strokeDashoffset={p.offset}
           />
         ))}

@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS `mascotas` (
   `alergias` TEXT DEFAULT NULL,
   `observaciones_medicas` TEXT DEFAULT NULL,
   `modo_extraviado` TINYINT(1) NOT NULL DEFAULT 0,
-  `recompensa` VARCHAR(80) DEFAULT 'S/ 500',
+  `recompensa` VARCHAR(80) DEFAULT NULL,
   `estado` ENUM('Activo', 'En Observación', 'Fallecido') NOT NULL DEFAULT 'Activo',
   `creado_en` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`id_propietario`) REFERENCES `propietarios`(`id_propietario`) ON DELETE CASCADE,
@@ -89,6 +89,18 @@ CREATE TABLE IF NOT EXISTS `consultas_historial` (
   FOREIGN KEY (`id_veterinario`) REFERENCES `usuarios`(`id_usuario`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
+-- Inventario de vacunas con trazabilidad por lote
+CREATE TABLE IF NOT EXISTS `lotes_vacunas` (
+  `id_lote` INT AUTO_INCREMENT PRIMARY KEY,
+  `vacuna` VARCHAR(120) NOT NULL,
+  `lote_fabricante` VARCHAR(60) NOT NULL,
+  `fecha_vencimiento` DATE NOT NULL,
+  `dosis_iniciales` INT UNSIGNED NOT NULL,
+  `dosis_disponibles` INT UNSIGNED NOT NULL,
+  `creado_en` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY `uq_lote_vacuna` (`vacuna`, `lote_fabricante`)
+) ENGINE=InnoDB;
+
 -- 6. Tabla de Carnet de Vacunación
 CREATE TABLE IF NOT EXISTS `carnet_vacunacion` (
   `id_vacunacion` INT AUTO_INCREMENT PRIMARY KEY,
@@ -97,12 +109,14 @@ CREATE TABLE IF NOT EXISTS `carnet_vacunacion` (
   `veterinario_nombre` VARCHAR(120) DEFAULT NULL,
   `vacuna` VARCHAR(120) NOT NULL,
   `lote_fabricante` VARCHAR(60) NOT NULL,
+  `id_lote` INT DEFAULT NULL,
   `fecha_aplicacion` DATE NOT NULL,
   `fecha_proximo_refuerzo` DATE NOT NULL,
   `estado_dosis` ENUM('al-dia', 'por-vencer', 'vencida') NOT NULL DEFAULT 'al-dia',
   `observaciones` VARCHAR(255) DEFAULT NULL,
   FOREIGN KEY (`id_mascota`) REFERENCES `mascotas`(`id_mascota`) ON DELETE CASCADE,
-  FOREIGN KEY (`id_veterinario`) REFERENCES `usuarios`(`id_usuario`) ON DELETE SET NULL
+  FOREIGN KEY (`id_veterinario`) REFERENCES `usuarios`(`id_usuario`) ON DELETE SET NULL,
+  FOREIGN KEY (`id_lote`) REFERENCES `lotes_vacunas`(`id_lote`) ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 -- 7. Tabla de Recordatorios y Notificaciones (WhatsApp, SMS, Correo)
@@ -175,26 +189,6 @@ CREATE TABLE IF NOT EXISTS `historial_mensajes` (
   FOREIGN KEY (`id_recordatorio`) REFERENCES `recordatorios`(`id_recordatorio`) ON DELETE SET NULL
 ) ENGINE=InnoDB;
 
--- =======================================================
--- DATOS INICIALES DE DEMOSTRACIÓN (PASSWORD: password123)
--- =======================================================
-
-INSERT INTO `usuarios` (`nombres`, `correo`, `contrasena_cifrada`, `rol`, `dni`, `telefono`, `direccion`, `especialidad`, `turno`, `estado`) VALUES
-('Administrador General', 'admin@huellas.com', '$2b$12$K1d0/P07v403ZlA5tN8cYb3FjS6uAe1GhP5oXiT0vEzMnQe8P3eTC', 'Administrador', '40000001', '987654321', 'Av. Primavera 1234, Surco, Lima', 'Dirección Médica & Sistemas', 'Permanente', 'activo'),
-('Dra. Ana Torres Paredes', 'veterinario@huellas.com', '$2b$12$K1d0/P07v403ZlA5tN8cYb3FjS6uAe1GhP5oXiT0vEzMnQe8P3eTC', 'Veterinario', '40000002', '987654322', 'Av. Primavera 1234, Surco, Lima', 'Medicina General & Cirugía', 'Mañana (8:00 - 14:00)', 'activo'),
-('Dr. Luis Vega Morales', 'luis.vega@huellas.com', '$2b$12$K1d0/P07v403ZlA5tN8cYb3FjS6uAe1GhP5oXiT0vEzMnQe8P3eTC', 'Veterinario', '40000003', '987654323', 'Av. Primavera 1234, Surco, Lima', 'Medicina Felina & Vacunas', 'Tarde (14:00 - 20:00)', 'activo'),
-('Carlos Mendoza Rios', 'recepcion@huellas.com', '$2b$12$K1d0/P07v403ZlA5tN8cYb3FjS6uAe1GhP5oXiT0vEzMnQe8P3eTC', 'Recepcionista', '40000004', '987654324', 'Av. Primavera 1234, Surco, Lima', 'Admisión & Triaje QR', 'Completo (8:00 - 17:00)', 'activo'),
-('Lucía Paredes Torres', 'propietario@gmail.com', '$2b$12$K1d0/P07v403ZlA5tN8cYb3FjS6uAe1GhP5oXiT0vEzMnQe8P3eTC', 'Propietario', '72345678', '976543210', 'Calle Las Acacias 120, Surco, Lima', NULL, NULL, 'activo')
-ON DUPLICATE KEY UPDATE `nombres` = VALUES(`nombres`);
-
-INSERT INTO `propietarios` (`id_usuario`, `nombres`, `dni`, `telefono`, `correo`, `direccion`) VALUES
-(NULL, 'Jorge Salas Méndez', '44521098', '987654321', 'jorge.salas@gmail.com', 'Av. Larco 450, Miraflores, Lima'),
-((SELECT `id_usuario` FROM `usuarios` WHERE `correo` = 'propietario@gmail.com' LIMIT 1), 'Lucía Paredes Torres', '72345678', '976543210', 'propietario@gmail.com', 'Calle Las Acacias 120, Surco, Lima'),
-(NULL, 'Carla Mendoza Vidal', '40981245', '965432109', 'carla.mendoza@yahoo.com', 'Av. Primavera 890, Surco, Lima'),
-(NULL, 'Andrés Quispe Castro', '48123901', '954321098', 'andres.quispe@hotmail.com', 'Jr. Monterrico 234, La Molina, Lima'),
-(NULL, 'Valeria Núñez Rivas', '71902451', '943210987', 'valeria.nunez@gmail.com', 'Av. El Sol 1102, Chorrillos, Lima')
-ON DUPLICATE KEY UPDATE `nombres` = VALUES(`nombres`);
-
 -- Población de la Tabla Normalizada de Razas
 INSERT INTO `razas` (`id_raza`, `nombre_raza`, `especie`, `descripcion`) VALUES
 (1, 'Beagle', 'Canino', 'Raza mediana, sabueso de gran olfato y temperamento sociable'),
@@ -220,28 +214,3 @@ INSERT INTO `razas` (`id_raza`, `nombre_raza`, `especie`, `descripcion`) VALUES
 (21, 'Ninfa / Carolina', 'Ave', 'Ave con cresta eréctil y temperamento cariñoso'),
 (22, 'Cobayo / Cuy Peruano', 'Otro', 'Roedor doméstico herbívoro y muy dócil')
 ON DUPLICATE KEY UPDATE `nombre_raza` = VALUES(`nombre_raza`);
-
-INSERT INTO `mascotas` (`id_propietario`, `id_raza`, `codigo_qr`, `microchip`, `nombre`, `especie`, `raza`, `sexo`, `edad`, `peso_actual`, `color`, `alergias`, `foto_url`, `modo_extraviado`, `recompensa`) VALUES
-(1, 1, 'HP-4092', '981098124', 'Toby', 'Canino', 'Beagle', 'Macho', '3 años', 12.40, 'Tricolor', 'Alergia severa a pulgas. No derivados de penicilina.', 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80', 1, 'S/ 500'),
-(2, 13, 'HP-8813', '981098451', 'Luna', 'Felino', 'Siamés', 'Hembra', '1 año y medio', 3.80, 'Crema y chocolate', 'Ninguna conocida.', 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80', 0, 'S/ 300'),
-(3, 2, 'HP-1294', '981098772', 'Max', 'Canino', 'Golden Retriever', 'Macho', '4 años', 29.20, 'Dorado', 'Sensibilidad estomacal a granos.', 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80', 0, 'S/ 500')
-ON DUPLICATE KEY UPDATE `nombre` = VALUES(`nombre`);
-
-INSERT INTO `carnet_vacunacion` (`id_mascota`, `id_veterinario`, `veterinario_nombre`, `vacuna`, `lote_fabricante`, `fecha_aplicacion`, `fecha_proximo_refuerzo`, `estado_dosis`) VALUES
-(1, 2, 'Dra. Ana Torres Paredes', 'Séxtuple Canina Vanguard', 'LT-4412', CURDATE() - INTERVAL 90 DAY, CURDATE() + INTERVAL 5 DAY, 'por-vencer'),
-(1, 2, 'Dra. Ana Torres Paredes', 'Antirrábica Rabisin', 'LT-8821', CURDATE() - INTERVAL 30 DAY, CURDATE() + INTERVAL 335 DAY, 'al-dia'),
-(2, 3, 'Dr. Luis Vega Morales', 'Triple Felina Felocell', 'LT-9031', CURDATE() - INTERVAL 60 DAY, CURDATE() + INTERVAL 10 DAY, 'por-vencer');
-
-INSERT INTO `consultas_historial` (`id_mascota`, `id_veterinario`, `veterinario_nombre`, `motivo_consulta`, `temperatura`, `peso`, `diagnostico`, `tratamiento_receta`, `estado`) VALUES
-(3, 2, 'Dra. Ana Torres Paredes', 'Control Anual & Desparasitación', 38.5, 29.2, 'Paciente en excelente condición física.', 'NexGard Spectra 30kg 1 tableta masticable.', 'done'),
-(1, 2, 'Dra. Ana Torres Paredes', 'Dermatitis y Otitis Externa', 38.8, 12.4, 'Inflamación de conducto auditivo derecho.', 'Otovier gotas óticas 4 gotas cada 12 horas por 7 días.', 'progress');
-
-INSERT INTO `registro_pesos` (`id_mascota`, `peso_kg`, `origen`, `registrado_en`) VALUES
-(1, 14.10, 'registro', NOW() - INTERVAL 60 DAY),
-(1, 12.40, 'consulta', NOW() - INTERVAL 5 DAY),
-(2, 3.80, 'registro', NOW() - INTERVAL 40 DAY),
-(3, 29.20, 'consulta', NOW() - INTERVAL 10 DAY);
-
-INSERT INTO `recordatorios` (`id_mascota`, `id_propietario`, `canal`, `asunto`, `mensaje`, `telefono_destino`, `correo_destino`, `fecha_programada`, `estado`, `generado_por_ia`) VALUES
-(1, 1, 'WhatsApp', 'Refuerzo de Vacuna Séxtuple', 'Hola Jorge, le saluda la Clínica Veterinaria Huellas. Le recordamos que la vacuna Séxtuple de Toby vence pronto. Agende su cita respondiendo a este mensaje.', '987654321', 'jorge.salas@gmail.com', NOW() + INTERVAL 1 DAY, 'Programado', 1),
-(2, 2, 'WhatsApp', 'Control Vacunal Felino', 'Hola Lucía, le recordamos que Luna tiene su refuerzo anual programado en Clínica Huellas. ¡Cuidamos a los que más quieres!', '976543210', 'propietario@gmail.com', NOW() + INTERVAL 3 DAY, 'Programado', 1);

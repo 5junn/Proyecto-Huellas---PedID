@@ -53,6 +53,15 @@ app.get('/', async (req, res) => {
   });
 });
 
+app.get('/api/contacto-clinica', (req, res) => {
+  res.json({
+    nombre: process.env.CLINIC_NAME?.trim() || 'Clínica Veterinaria Huellas',
+    telefono: process.env.CLINIC_PHONE?.trim() || null,
+    whatsapp: process.env.CLINIC_WHATSAPP?.trim() || null,
+    direccion: process.env.CLINIC_ADDRESS?.trim() || null,
+  });
+});
+
 // Rutas principales
 app.use('/api/auth', require('./src/routes/authRoutes'));
 app.use('/api/mascotas', require('./src/routes/mascotas.routes'));

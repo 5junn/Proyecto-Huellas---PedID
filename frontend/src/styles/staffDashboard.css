@@ -504,3 +504,18 @@ select option {
   margin: 0.4rem 0 0.75rem;
   padding-left: 1.2rem;
 }
+
+.dashboard-chart-header {
+  flex-wrap: wrap;
+}
+
+.dashboard-chart-header select,
+.mgmt-toolbar > select {
+  width: auto;
+  max-width: 100%;
+}
+
+.dashboard-chart-range {
+  width: max-content;
+  margin: 0 1.4rem 1rem;
+}

@@ -17,6 +17,17 @@ const {
   generateEmergencyGuidance,
 } = require('../src/services/aiService');
 
+test('Las fechas del carnet distinguen un refuerzo para hoy de uno vencido', () => {
+  const { daysBetween, validDay, vaccineStatus } = require('../src/utils/clinicDates');
+  assert.equal(validDay('2026-02-30'), false);
+  assert.equal(validDay('2028-02-29'), true);
+  const today = '2026-11-28';
+  assert.equal(vaccineStatus(daysBetween(today, today)), 'por-vencer');
+  assert.equal(vaccineStatus(daysBetween(today, '2026-11-27')), 'vencida');
+  assert.equal(vaccineStatus(daysBetween(today, '2026-12-13')), 'por-vencer');
+  assert.equal(vaccineStatus(daysBetween(today, '2026-12-14')), 'al-dia');
+});
+
 test('Seguridad: hashPassword y verifyPassword funcionan correctamente', () => {
   const hash = hashPassword('ClaveSegura2026!');
   assert.ok(hash.startsWith('scrypt:'));
@@ -128,7 +139,8 @@ test('IA 4 - Asistente de Emergencia: protege privacidad en modo control y activ
   });
   assert.equal(normal.modo_mascota_perdida, false);
   assert.match(normal.privacidad_aplicada, /29733/);
-  assert.ok(normal.boton_llamada_clinica.tel.startsWith('tel:'));
+  const clinicPhone = process.env.CLINIC_PHONE?.trim();
+  assert.equal(normal.boton_llamada_clinica?.numero ?? null, clinicPhone || null);
 
   const lost = await generateEmergencyGuidance({
     pet: { nombre: 'Toby', especie: 'Canino', raza: 'Beagle', alergias: 'No penicilina' },

@@ -1,23 +1,21 @@
 // src/pages/Landing.jsx
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import Icon from '../components/Icon';
-import Logo from '../components/Logo';
-import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
 import { isAuthenticated } from '../services/authService';
 import '../styles/landing.css';
 
 export default function Landing() {
-  const [simulatorMode, setSimulatorMode] = useState('normal'); // 'normal' | 'lost'
-  const [alertSent, setAlertSent] = useState(false);
-  const [isChatbotOpen, setIsChatbotOpen] = useState(false);
+  const navigate = useNavigate();
+  const [plateCode, setPlateCode] = useState('');
   const auth = isAuthenticated();
 
-  const handleSimulateScan = () => {
-    setAlertSent(true);
-    setTimeout(() => setAlertSent(false), 3500);
+  const findPlate = (event) => {
+    event.preventDefault();
+    const code = plateCode.trim().toUpperCase();
+    if (code) navigate(`/pet/${encodeURIComponent(code)}`);
   };
 
   return (
@@ -59,308 +57,28 @@ export default function Landing() {
                 </Link>
               )}
 
-              <a href="#simulador" className="hp-hero-btn secondary">
+              <a href="#buscar-placa" className="hp-hero-btn secondary">
                 <Icon name="qr" size={20} />
-                <span>Probar Demo de Placa</span>
+                <span>Consultar una placa</span>
               </a>
             </div>
 
-            <div className="hp-hero-trust">
-              <div className="hp-trust-avatars">
-                <span className="hp-avatar t1" title="Caninos protegidos">
-                  <Icon name="dog" size={18} />
-                </span>
-                <span className="hp-avatar t2" title="Felinos protegidos">
-                  <Icon name="cat" size={18} />
-                </span>
-                <span className="hp-avatar t3" title="Trazabilidad QR">
-                  <Icon name="paw" size={18} />
-                </span>
-              </div>
-              <div className="hp-trust-text">
-                <strong>+1,280 mascotas protegidas</strong>
-                <span>Respaldado por médicos veterinarios colegiados</span>
-              </div>
+          </div>
+
+          <section className="hp-hero-visual" id="buscar-placa" aria-labelledby="plate-search-title">
+            <div className="hp-plate-search">
+              <Icon name="qr" size={34} />
+              <h2 id="plate-search-title">Consulta una placa QR</h2>
+              <p>Si encontraste una mascota, escanea su placa o escribe el código impreso para abrir su ficha.</p>
+              <form onSubmit={findPlate}>
+                <label htmlFor="plate-code">Código de la placa</label>
+                <input id="plate-code" required maxLength={50} value={plateCode}
+                  onChange={(event) => setPlateCode(event.target.value)}
+                  autoComplete="off" spellCheck={false} />
+                <button className="hp-hero-btn primary" type="submit">Buscar placa</button>
+              </form>
             </div>
-          </div>
-
-          {/* HERO VISUAL: TARJETA 3D INTERACTIVA */}
-          <div className="hp-hero-visual">
-            <div className="hp-pet-card-3d">
-              <div className="hp-pet-card-header">
-                <div className="hp-pet-header-left">
-                  <div className="hp-pet-avatar">
-                    <img
-                      src="https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=300&q=80"
-                      alt="Toby Beagle"
-                      className="hp-pet-img"
-                    />
-                    <span className="hp-pet-online-dot" />
-                  </div>
-                  <div>
-                    <h3 className="hp-pet-name">Toby</h3>
-                    <span className="hp-pet-breed">Beagle · 3 años</span>
-                  </div>
-                </div>
-                <div className="hp-pet-status-pill">
-                  <Icon name="check" size={14} />
-                  <span>Activo</span>
-                </div>
-              </div>
-
-              <div className="hp-pet-qr-box">
-                <div className="hp-qr-code-mockup">
-                  <svg viewBox="0 0 100 100" className="hp-qr-svg">
-                    <rect width="100" height="100" fill="white" rx="12" />
-                    {/* Marcador superior izquierdo */}
-                    <rect x="10" y="10" width="24" height="24" fill="#0A1128" rx="4" />
-                    <rect x="15" y="15" width="14" height="14" fill="white" rx="2" />
-                    <rect x="18" y="18" width="8" height="8" fill="#2563EB" rx="1.5" />
-                    {/* Marcador superior derecho */}
-                    <rect x="66" y="10" width="24" height="24" fill="#0A1128" rx="4" />
-                    <rect x="71" y="15" width="14" height="14" fill="white" rx="2" />
-                    <rect x="74" y="18" width="8" height="8" fill="#2563EB" rx="1.5" />
-                    {/* Marcador inferior izquierdo */}
-                    <rect x="10" y="66" width="24" height="24" fill="#0A1128" rx="4" />
-                    <rect x="15" y="71" width="14" height="14" fill="white" rx="2" />
-                    <rect x="18" y="74" width="8" height="8" fill="#2563EB" rx="1.5" />
-                    {/* Patrón de datos */}
-                    <rect x="40" y="14" width="6" height="6" fill="#0A1128" />
-                    <rect x="50" y="20" width="8" height="6" fill="#06B6D4" />
-                    <rect x="42" y="32" width="16" height="6" fill="#0A1128" />
-                    <rect x="14" y="42" width="8" height="12" fill="#0A1128" />
-                    <rect x="26" y="46" width="8" height="8" fill="#2563EB" />
-                    <rect x="38" y="46" width="24" height="8" fill="#0A1128" />
-                    <rect x="68" y="42" width="18" height="8" fill="#06B6D4" />
-                    <rect x="46" y="64" width="12" height="12" fill="#0A1128" />
-                    <rect x="64" y="68" width="10" height="8" fill="#2563EB" />
-                    <rect x="78" y="64" width="12" height="12" fill="#0A1128" />
-                    <circle cx="50" cy="50" r="6" fill="#10B981" />
-                  </svg>
-                </div>
-                <div className="hp-pet-qr-info">
-                  <span className="hp-qr-id-tag">Placa #HP-4092</span>
-                  <strong>Escanea con cualquier celular</strong>
-                  <p>Muestra contacto, vacunas y dirección del dueño al instante.</p>
-                </div>
-              </div>
-
-              <div className="hp-pet-quick-stats">
-                <div className="hp-quick-stat">
-                  <Icon name="shield" size={16} />
-                  <span>Vacunas al día (5/5)</span>
-                </div>
-                <div className="hp-quick-stat">
-                  <Icon name="doctor" size={16} />
-                  <span>Dra. Ana Torres</span>
-                </div>
-              </div>
-
-              <div className="hp-floating-badge badge-lost">
-                <div className="hp-pulse-red" />
-                <span>Modo Mascota Perdida Listo</span>
-              </div>
-
-              <div className="hp-floating-badge badge-clinic">
-                <Icon name="paw" size={16} />
-                <span>Clínica Huellas Conectada</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* STATS BAR */}
-      <section className="hp-stats-strip">
-        <div className="hp-stats-container">
-          <div className="hp-stat-item">
-            <span className="hp-stat-number">+1,280</span>
-            <span className="hp-stat-label">Mascotas con Placa QR Activa</span>
-          </div>
-          <div className="hp-stat-item">
-            <span className="hp-stat-number">99.8%</span>
-            <span className="hp-stat-label">Éxito en Reunificación de Mascotas</span>
-          </div>
-          <div className="hp-stat-item">
-            <span className="hp-stat-number">0 Apps</span>
-            <span className="hp-stat-label">Requeridas para el que escanea</span>
-          </div>
-          <div className="hp-stat-item">
-            <span className="hp-stat-number">24/7</span>
-            <span className="hp-stat-label">Atención Médica y Soporte</span>
-          </div>
-        </div>
-      </section>
-
-      {/* SIMULADOR INTERACTIVO QR */}
-      <section id="simulador" className="hp-sim-section">
-        <div className="hp-sim-container">
-          <div className="hp-section-header center">
-            <div className="hp-section-pill">
-              <Icon name="qr" size={14} />
-              <span>Simulador en Tiempo Real</span>
-            </div>
-            <h2>¿Qué ocurre cuando alguien escanea la placa de tu mascota?</h2>
-            <p>
-              Cualquier persona que encuentre a tu mascota puede escanear su medalla con la cámara de su celular. No necesita descargar aplicaciones. Pruébalo tú mismo aquí:
-            </p>
-          </div>
-
-          <div className="hp-sim-wrapper">
-            {/* Controles del simulador */}
-            <div className="hp-sim-controls">
-              <button
-                className={`hp-sim-mode-btn ${simulatorMode === 'normal' ? 'active' : ''}`}
-                onClick={() => setSimulatorMode('normal')}
-              >
-                <Icon name="shield" size={18} />
-                <div>
-                  <strong>Modo Habitual / Control</strong>
-                  <span>Carnet de vacunas, datos médicos y dueño</span>
-                </div>
-              </button>
-
-              <button
-                className={`hp-sim-mode-btn danger ${simulatorMode === 'lost' ? 'active' : ''}`}
-                onClick={() => setSimulatorMode('lost')}
-              >
-                <Icon name="alert" size={18} />
-                <div>
-                  <strong>Modo Mascota Extraviada</strong>
-                  <span>Alerta máxima urgente y contacto inmediato</span>
-                </div>
-              </button>
-
-              <div className="hp-sim-explanation">
-                <h4>
-                  <Icon name="spark" size={18} />
-                  ¿Cómo funciona la geolocalización?
-                </h4>
-                <p>
-                  Cuando la placa es escaneada en Modo Extraviada, el navegador solicita un toque para enviar la ubicación aproximada por GPS al teléfono del dueño en tiempo real.
-                </p>
-                <button
-                  className="hp-btn-test-scan"
-                  onClick={handleSimulateScan}
-                  disabled={alertSent}
-                >
-                  <Icon name="bell" size={16} />
-                  <span>{alertSent ? '¡Notificación enviada al dueño!' : 'Simular escaneo en la calle'}</span>
-                </button>
-                {alertSent && (
-                  <div className="hp-sim-toast">
-                    <Icon name="check" size={16} />
-                    <span>¡Alerta enviada! "Toby fue escaneado en Miraflores".</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Mockup de Celular con la pantalla pública */}
-            <div className="hp-sim-phone">
-              <div className="hp-phone-frame">
-                <div className="hp-phone-notch">
-                  <span className="hp-phone-speaker" />
-                  <span className="hp-phone-camera" />
-                </div>
-
-                <div className={`hp-phone-screen ${simulatorMode === 'lost' ? 'lost-mode' : ''}`}>
-                  {simulatorMode === 'lost' ? (
-                    /* PANTALLA EN MODO EXTRAVIADO */
-                    <div className="hp-screen-emergency animate-fade">
-                      <div className="hp-emergency-banner">
-                        <Icon name="alert" size={24} />
-                        <div>
-                          <strong>¡ESTOY PERDIDO, AYÚDAME!</strong>
-                          <span>Recompensa ofrecida por mi familia</span>
-                        </div>
-                      </div>
-
-                      <div className="hp-screen-pet-profile">
-                        <img
-                          src="https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=300&q=80"
-                          alt="Toby"
-                          className="hp-screen-avatar"
-                        />
-                        <h3>Toby</h3>
-                        <p>Beagle Macho · 3 años</p>
-                        <span className="hp-screen-badge-danger">¡Favor retenerlo con cuidado!</span>
-                      </div>
-
-                      <div className="hp-emergency-actions">
-                        <a href="tel:+51987654321" className="hp-screen-btn call">
-                          <Icon name="phone" size={18} />
-                          <span>Llamar al Dueño (Jorge Salas)</span>
-                        </a>
-                        <button
-                          type="button"
-                          onClick={() => setIsChatbotOpen(true)}
-                          className="hp-screen-btn whatsapp"
-                          style={{ border: 'none', cursor: 'pointer' }}
-                        >
-                          <Icon name="whatsapp" size={18} />
-                          <span>Contactar mediante HuellasBot</span>
-                        </button>
-                      </div>
-
-                      <div className="hp-screen-info-card">
-                        <strong>Condiciones médicas especiales:</strong>
-                        <p>Requiere medicación diaria para alergia en la piel. Es muy amigable y responde a su nombre.</p>
-                      </div>
-
-                      <div className="hp-screen-clinic-card">
-                        <span>Clínica de cabecera:</span>
-                        <strong>Clínica Veterinaria Huellas · Tel: 01 445 9090</strong>
-                      </div>
-                    </div>
-                  ) : (
-                    /* PANTALLA EN MODO NORMAL */
-                    <div className="hp-screen-normal animate-fade">
-                      <div className="hp-screen-header-normal">
-                        <Logo size={28} />
-                        <span>Ficha Oficial Huellas PetID</span>
-                      </div>
-
-                      <div className="hp-screen-pet-profile">
-                        <img
-                          src="https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=300&q=80"
-                          alt="Toby"
-                          className="hp-screen-avatar"
-                        />
-                        <h3>Toby</h3>
-                        <p>Beagle · Color Tricolor</p>
-                        <span className="hp-screen-chip-ok">Placa Activa & Verificada</span>
-                      </div>
-
-                      <div className="hp-screen-section">
-                        <h4>Datos del Propietario</h4>
-                        <div className="hp-info-row">
-                          <span>Dueño:</span>
-                          <strong>Jorge Salas</strong>
-                        </div>
-                        <div className="hp-info-row">
-                          <span>Distrito:</span>
-                          <strong>Miraflores, Lima</strong>
-                        </div>
-                      </div>
-
-                      <div className="hp-screen-section">
-                        <h4>Carnet de Vacunación</h4>
-                        <div className="hp-vax-pill">
-                          <Icon name="check" size={14} />
-                          <span>Antirrábica: Vigente (Nov 2026)</span>
-                        </div>
-                        <div className="hp-vax-pill">
-                          <Icon name="check" size={14} />
-                          <span>Sextuple Canina: Al día</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          </section>
         </div>
       </section>
 
@@ -586,7 +304,7 @@ export default function Landing() {
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap', marginBottom: '2.5rem' }}>
             <a
-              href="tel:+51987654321"
+              href="/emergencias"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -602,30 +320,8 @@ export default function Landing() {
               }}
             >
               <Icon name="phone" size={20} />
-              <span>Central 24 Horas: +51 987 654 321</span>
+              <span>Ver contactos de atención</span>
             </a>
-
-            <button
-              type="button"
-              onClick={() => setIsChatbotOpen(true)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.6rem',
-                padding: '0.9rem 1.6rem',
-                borderRadius: '14px',
-                background: '#10B981',
-                color: 'white',
-                fontWeight: 800,
-                fontSize: '1rem',
-                border: 'none',
-                cursor: 'pointer',
-                boxShadow: '0 8px 25px rgba(16, 185, 129, 0.35)'
-              }}
-            >
-              <Icon name="whatsapp" size={20} />
-              <span>Triage Inmediato HuellasBot</span>
-            </button>
 
             <Link
               to="/emergencias"
@@ -686,16 +382,6 @@ export default function Landing() {
           </div>
         </div>
       </section>
-
-      <WhatsAppChatbotModal
-        isOpen={isChatbotOpen}
-        onClose={() => setIsChatbotOpen(false)}
-        petName="Toby"
-        ownerName="Jorge Salas"
-        vaccineName="Alerta de Rescate Huellas PetID"
-        dueDate="Inmediato"
-        petCode="HP-4092"
-      />
 
       <Footer />
     </div>

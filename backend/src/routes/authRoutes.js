@@ -331,6 +331,20 @@ router.get('/propietarios', requireSession, allowRoles(RECEPTION_ROLES), async (
   }
 });
 
+// El listado de cuentas no incluye credenciales ni documentos personales.
+router.get('/usuarios', requireSession, allowRoles(['Administrador']), async (req, res) => {
+  try {
+    const [accounts] = await db.queryAsync(
+      `SELECT id_usuario AS id, nombres, correo, rol, especialidad, turno, estado
+       FROM usuarios ORDER BY nombres, id_usuario`
+    );
+    res.json(accounts);
+  } catch (err) {
+    console.error('[Cuentas GET]', err.code || err.name);
+    res.status(500).json({ message: 'Error al consultar las cuentas.' });
+  }
+});
+
 /**
  * GET /api/auth/staff
  * Lista personal clínico desde MySQL.

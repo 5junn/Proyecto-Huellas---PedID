@@ -83,12 +83,12 @@ async function generateSmartReminder({
   channel = 'WhatsApp',
 }) {
   const clinicName = process.env.CLINIC_NAME || 'Clínica Veterinaria Huellas';
-  const clinicPhone = process.env.CLINIC_PHONE || '+51 987 654 321';
+  const clinicPhone = process.env.CLINIC_PHONE?.trim() || null;
 
   const systemPrompt =
     'Eres un asistente veterinario experto en comunicación preventiva para Clínica Veterinaria Huellas (Lima, Perú). ' +
     'Devuelve SIEMPRE JSON válido con las llaves: asunto (string), mensaje (string), recomendacion_preventiva (string). ' +
-    'Redacta un mensaje empático, claro y profesional adaptado al canal (WhatsApp con formato limpio o Correo formal).';
+    'Redacta un mensaje empático, claro y profesional adaptado al canal. Usa únicamente los teléfonos, fechas y datos proporcionados.';
 
   const userPrompt = JSON.stringify({
     tarea: 'Redactar recordatorio inteligente de próxima dosis',
@@ -142,7 +142,7 @@ async function generateSmartReminder({
         `Le saludamos cordialmente desde ${clinicName}. De acuerdo con el carnet digital de ${petName} (${species} - ${breed}), ` +
         `su próxima aplicación de ${vaccineName} está programada para el ${dueDate}.\n\n` +
         `${urgencyNote.replace(/\*/g, '')}${allergyNote.replace(/\*/g, '')}\n\n` +
-        `Puede confirmar su cita respondiendo a este correo o comunicándose al ${clinicPhone}.\n\n` +
+        `Para coordinar la cita, responda a este correo${clinicPhone ? ` o llame al ${clinicPhone}` : ''}.\n\n` +
         `Atentamente,\nEquipo Médico · ${clinicName}`,
       recomendacion_preventiva: 'Mantener el intervalo vacunal evita pérdida de inmunidad y reduce costos clínicos futuros.',
       canal: 'Correo',
@@ -160,7 +160,7 @@ async function generateSmartReminder({
       `💉 *Próxima dosis:* ${vaccineName}\n` +
       `📆 *Fecha estimada:* ${dueDate}\n` +
       `${urgencyNote}${allergyNote}\n\n` +
-      `📲 Responde este mensaje o llámanos al *${clinicPhone}* para reservar el horario que mejor se adapte a ti.`,
+      `📲 Responde este mensaje${clinicPhone ? ` o llama al *${clinicPhone}*` : ''} para coordinar el horario de atención.`,
     recomendacion_preventiva: 'Confirmar cita con 48h de anticipación y llevar su placa QR.',
     canal: 'WhatsApp',
     generadoPorIA: true,
@@ -457,8 +457,15 @@ async function generateEmergencyGuidance({
   isLost = false,
   question = '',
 }) {
-  const clinicPhone = process.env.CLINIC_PHONE || '+51 987 654 321';
-  const clinicAddress = process.env.CLINIC_ADDRESS || 'Av. Primavera 1234, Santiago de Surco, Lima';
+  const clinicPhone = process.env.CLINIC_PHONE?.trim() || null;
+  const clinicAddress = process.env.CLINIC_ADDRESS?.trim() || null;
+  const clinicContact = clinicPhone ? `Llama a la clínica al ${clinicPhone}.` : 'Busca atención veterinaria.';
+  const clinicButton = clinicPhone ? {
+    etiqueta: `Llamar a Clínica Huellas (${clinicPhone})`,
+    tel: `tel:${clinicPhone.replace(/[^0-9+]/g, '')}`,
+    numero: clinicPhone,
+    direccion: clinicAddress,
+  } : null;
   const petName = pet?.nombre || 'la mascota';
   const allergies = pet?.alergias || 'Sin alergias reportadas';
   const hasAllergy = allergies && !/ninguna|sin alergia/i.test(allergies);
@@ -480,7 +487,7 @@ async function generateEmergencyGuidance({
       const aiResp = await callExternalAIJson({
         systemPrompt:
           'Eres el Asistente de Emergencia de Huellas PetID para quien acaba de escanear una placa QR. ' +
-          'IMPORTANTE DE PRIVACIDAD (Ley N° 29733): NUNCA inventes ni reveles dirección de domicilio ni DNI del dueño. ' +
+          'Ley N° 29733: nunca reveles ni inventes datos de contacto. Usa solo el teléfono y la dirección de la clínica proporcionados. ' +
           'Si modo_mascota_perdida es false, indica respetar la privacidad del dueño y derivar toda emergencia a la clínica. ' +
           'Si modo_mascota_perdida es true, prioriza resguardo seguro, envío de GPS y llamada a la clínica/rescate. ' +
           'Devuelve SIEMPRE JSON válido con: pasos_inmediatos (array de 3-4 pasos breves y claros), ' +
@@ -496,12 +503,7 @@ async function generateEmergencyGuidance({
             : [],
           respuesta_asistente: sanitizeText(aiResp.parsed.respuesta_asistente, 1200),
           advertencias_medicas: sanitizeText(aiResp.parsed.advertencias_medicas || allergies, 400),
-          boton_llamada_clinica: {
-            etiqueta: `Llamar a Clínica Huellas 24/7 (${clinicPhone})`,
-            tel: `tel:${clinicPhone.replace(/[^0-9+]/g, '')}`,
-            numero: clinicPhone,
-            direccion: clinicAddress,
-          },
+          boton_llamada_clinica: clinicButton,
           privacidad_aplicada: isLost
             ? 'Modo Mascota Perdida activo: dirección particular y DNI ocultos; canal de rescate habilitado.'
             : 'Modo Control Seguro: teléfono privado, DNI y domicilio del propietario estrictamente protegidos (Ley N° 29733).',
@@ -519,14 +521,14 @@ async function generateEmergencyGuidance({
   const pasos = isLost
     ? [
         `1. Mantén la calma y resguarda a ${petName} en un lugar seguro con agua fresca (sin darle alimentos ni medicamentos).`,
-        `2. Pulsa "Compartir mi Ubicación de Rescate (GPS)" para alertar automáticamente a su familia y a la clínica.`,
-        `3. Si ${petName} está herido o desorientado, llama de inmediato a la Clínica Huellas 24/7 o llévalo a ${clinicAddress}.`,
-        '4. Usa el botón de llamada directa o el chat de rescate para coordinar la entrega segura.',
+        `2. Pulsa "Compartir mi Ubicación de Rescate (GPS)" para alertar automáticamente a su familia y guardar el reporte para la clínica.`,
+        `3. Si ${petName} está herido o desorientado, busca atención inmediata. ${clinicContact}`,
+        '4. Usa el botón de llamada directa o el contacto de la clínica para coordinar la entrega segura.',
       ]
     : [
         `1. Verifica que ${petName} se encuentre acompañado(a); su placa indica Modo Habitual / Control Seguro.`,
         `2. Consulta sus alergias médicas (${allergies}) antes de ofrecer premios o asistencia.`,
-        `3. Ante cualquier emergencia médica o accidente, llama directamente a la Clínica Veterinaria Huellas (${clinicPhone}).`,
+        `3. Ante cualquier emergencia médica o accidente, busca atención veterinaria. ${clinicContact}`,
         '4. Por Ley N° 29733, los datos personales y dirección del dueño permanecen protegidos.',
       ];
 
@@ -535,11 +537,11 @@ async function generateEmergencyGuidance({
   if (!q) {
     respuesta = isLost
       ? `🚨 *Protocolo de Rescate Activo para ${petName}*: Sigue estos pasos simples para ponerlo a salvo. Si notas heridas o decaimiento, llama directo a la clínica.`
-      : `🛡️ *Asistente de Emergencia Huellas*: ${petName} está en Modo Control. Su información privada está protegida; si presencias una urgencia veterinaria, usa el botón de llamada directa a nuestra guardia 24/7.`;
+      : `🛡️ *Asistente de Emergencia Huellas*: ${petName} está en Modo Control. Su información privada está protegida; si presencias una urgencia veterinaria, busca atención veterinaria.`;
   } else if (/(herid|sangr|accidente|golpe|atropell|respira|convulsi|envenen|vomit)/i.test(q)) {
     respuesta =
       `🚑 *Atención Prioritaria para ${petName}*: No administres medicamentos de humanos. Mantenlo inmóvil y abrigado, ` +
-      `ten presente su condición (${allergies}) y llama AHORA a la guardia 24/7 de la clínica al *${clinicPhone}* para recibir triaje en ruta hacia *${clinicAddress}*.`;
+      `ten presente su condición (${allergies}) y busca atención de urgencia. ${clinicContact}`;
   } else if (/(alergia|comida|agua|medicina|darle|comer)/i.test(q)) {
     respuesta =
       `⚠️ *Cuidado Alimentario y Alergias de ${petName}*: ${allergies}. ` +
@@ -547,10 +549,10 @@ async function generateEmergencyGuidance({
   } else if (/(due[nñ]o|tel[eé]fono|casa|direcci[oó]n|viv|llamar)/i.test(q)) {
     respuesta = isLost
       ? `📞 El Modo Mascota Perdida está ACTIVO para *${petName}*. Puedes usar el botón de llamada directa al rescate o enviar tu ubicación GPS; por seguridad familiar (Ley N° 29733), su domicilio exacto no se muestra públicamente.`
-      : `🔒 Por protección de datos personales (Ley N° 29733), mientras *${petName}* no esté en Modo Mascota Perdida, el teléfono privado y domicilio del dueño están ocultos. Comunícate directamente con la *Clínica Huellas* al *${clinicPhone}* y nuestro equipo contactará al propietario.`;
+      : `🔒 Por protección de datos personales (Ley N° 29733), mientras *${petName}* no esté en Modo Mascota Perdida, el teléfono privado y domicilio del dueño están ocultos. ${clinicContact}`;
   } else {
     respuesta =
-      `🐾 Gracias por asistir a *${petName}*. ${isLost ? 'Envía tu ubicación GPS o llama directo para coordinar el reencuentro.' : 'Si necesita atención médica urgente, comunícate de inmediato con nuestra clínica 24/7.'}`;
+      `🐾 Gracias por asistir a *${petName}*. ${isLost ? 'Envía tu ubicación GPS o llama directo para coordinar el reencuentro.' : 'Si necesita atención médica urgente, busca atención veterinaria de inmediato.'}`;
   }
 
   return {
@@ -559,12 +561,7 @@ async function generateEmergencyGuidance({
     advertencias_medicas: hasAllergy
       ? `⚠️ ALERTA CLÍNICA: ${allergies}`
       : 'Sin alergias severas reportadas. No automedicar con fármacos de uso humano.',
-    boton_llamada_clinica: {
-      etiqueta: `Llamar a Clínica Huellas 24/7 (${clinicPhone})`,
-      tel: `tel:${clinicPhone.replace(/[^0-9+]/g, '')}`,
-      numero: clinicPhone,
-      direccion: clinicAddress,
-    },
+    boton_llamada_clinica: clinicButton,
     privacidad_aplicada: isLost
       ? 'Modo Mascota Perdida activo: dirección particular y DNI ocultos; canal de rescate habilitado.'
       : 'Modo Control Seguro: teléfono privado, DNI y domicilio del propietario estrictamente protegidos (Ley N° 29733).',

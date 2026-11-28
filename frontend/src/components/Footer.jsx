@@ -49,7 +49,7 @@ export default function Footer() {
               <li><a href="/#servicios">Carnet Digital de Vacunas</a></li>
               <li><a href="/#como-funciona">Modo Mascota Extraviada</a></li>
               <li><a href="/#servicios">Historial Clínico Digital</a></li>
-              <li><Link to="/pet/demo">Simulador de Placa Escaneada</Link></li>
+              <li><a href="/#buscar-placa">Consultar una placa QR</a></li>
             </ul>
           </div>
 
@@ -83,27 +83,7 @@ export default function Footer() {
           {/* Columna 4: Atención & Emergencias */}
           <div className="hp-footer-col emergency">
             <h4 className="hp-footer-heading">Atención & Emergencias</h4>
-            <div className="hp-emergency-card">
-              <div className="hp-em-icon">
-                <Icon name="phone" size={18} />
-              </div>
-              <div>
-                <span className="hp-em-label">Línea de Emergencia 24/7</span>
-                <strong className="hp-em-number">+51 987 654 321</strong>
-              </div>
-            </div>
-            <div className="hp-contact-item">
-              <Icon name="pin" size={16} />
-              <span>Av. Primavera 1280, Santiago de Surco, Lima</span>
-            </div>
-            <div className="hp-contact-item">
-              <Icon name="clock" size={16} />
-              <span>Lunes a Sábado: 8:00 AM - 8:00 PM</span>
-            </div>
-            <div className="hp-contact-item">
-              <Icon name="mail" size={16} />
-              <span>soporte@huellaspetid.com</span>
-            </div>
+            <Link to="/emergencias">Ver contacto de la clínica</Link>
           </div>
         </div>
 

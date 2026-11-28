@@ -4,36 +4,12 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo';
 import Icon from '../components/Icon';
 import CollarQRTag from '../components/CollarQRTag';
-import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
+import ClinicContactDialog from '../components/ClinicContactDialog';
 import { isStaff } from '../services/authService';
+import { phoneLink } from '../services/clinicContact';
 import { apiFetch } from '../services/apiClient';
 import { askEmergencyAssistantAI } from '../services/whatsappService';
 import '../styles/landing.css';
-
-const DEFAULT_PET_BASE = {
-  codigo: 'HP-4092',
-  nombre: 'Toby',
-  especie: 'Canino',
-  raza: 'Beagle Tricolor',
-  edad: '3 años',
-  sexo: 'Macho',
-  peso: '12.4 kg',
-  color: 'Tricolor',
-  propietario: 'Jorge Salas',
-  telefono: '+51 987 654 321',
-  distrito: 'Miraflores, Lima - Perú',
-  foto: 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=600&q=80',
-  clinica: 'Clínica Veterinaria Huellas',
-  dirClinica: 'Av. Primavera 1234, Santiago de Surco, Lima',
-  telClinica: '+51 987 654 321',
-  horarioClinica: 'Lunes a Domingo · Emergencias 24/7',
-  vacunas: [
-    { nombre: 'Antirrábica', fecha: '14 Oct 2026', proxima: '14 Oct 2027', estado: 'Vigente', vet: 'Dra. Ana Torres' },
-    { nombre: 'Sextuple Canina', fecha: '20 Ago 2026', proxima: '20 Ago 2027', estado: 'Vigente', vet: 'Dra. Ana Torres' },
-    { nombre: 'Desparasitación Interna', fecha: '02 Nov 2026', proxima: '02 Feb 2027', estado: 'Vigente', vet: 'Dr. Luis Vega' },
-  ],
-  alergias: 'Alergia severa a picaduras de pulgas. No administrar derivados de penicilina.',
-};
 
 export default function PetQRView() {
   const { codigo } = useParams();
@@ -42,11 +18,11 @@ export default function PetQRView() {
 
 function PetQRCard({ codigo }) {
   const navigate = useNavigate();
-  const demo = codigo.toLowerCase() === 'demo';
-  const [pet, setPet] = useState(demo ? { ...DEFAULT_PET_BASE, codigo: 'demo', telefono: null } : null);
+  const [pet, setPet] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [gpsError, setGpsError] = useState('');
   const isLost = Boolean(pet?.estadoExtravio);
+  const clinicPhone = phoneLink(pet?.telClinica);
   const [gpsSent, setGpsSent] = useState(false);
   const [gpsSending, setGpsSending] = useState(false);
   const [gpsSentData, setGpsSentData] = useState(null);
@@ -60,7 +36,6 @@ function PetQRCard({ codigo }) {
   const [emergencyLoading, setEmergencyLoading] = useState(false);
 
   useEffect(() => {
-    if (demo) return;
     const controller = new AbortController();
     apiFetch(`/mascotas/${encodeURIComponent(codigo)}`, { authenticated: false, signal: controller.signal })
       .then(setPet)
@@ -68,14 +43,14 @@ function PetQRCard({ codigo }) {
         if (error.name !== 'AbortError') setLoadError(error.status === 404 ? 'Placa QR no encontrada.' : error.message);
       });
     return () => controller.abort();
-  }, [codigo, demo]);
+  }, [codigo]);
 
   // Actualizar guía del Asistente de Emergencia IA al cambiar modo o mascota
   useEffect(() => {
     if (!pet) return;
     let active = true;
     askEmergencyAssistantAI({
-      codigo_qr: demo ? undefined : pet.codigo,
+      codigo_qr: pet.codigo,
       petName: pet.nombre,
       especie: pet.especie,
       raza: pet.raza,
@@ -93,20 +68,16 @@ function PetQRCard({ codigo }) {
             ? [
                 `1. Resguarda a ${pet.nombre} en un lugar tranquilo con agua fresca.`,
                 '2. Pulsa "Compartir mi Ubicación de Rescate (GPS)" para alertar al dueño.',
-                `3. Si está herido, llama directo a la Clínica Huellas (${pet.telClinica}).`
+                '3. Si está herido, busca atención veterinaria urgente.'
               ]
             : [
                 `1. ${pet.nombre} se encuentra en Modo Control Seguro.`,
                 `2. Revisa sus alergias médicas antes de darle cualquier alimento.`,
-                `3. Ante una urgencia médica, llama directamente a la Clínica Huellas (${pet.telClinica}).`
+                '3. Ante una urgencia médica, busca atención veterinaria.'
               ],
           respuesta_asistente: isLost
             ? `Protocolo de Rescate activo para ${pet.nombre}. Usa el botón de GPS o llamada directa.`
             : `Modo Control Seguro: la privacidad del dueño está protegida (Ley N° 29733).`,
-          boton_llamada_clinica: {
-            etiqueta: `Llamar a Clínica Huellas 24/7 (${pet.telClinica})`,
-            tel: `tel:${(pet.telClinica || '+51987654321').replace(/[^0-9+]/g, '')}`,
-          },
           privacidad_aplicada: isLost
             ? 'Modo Mascota Perdida activo: domicilio oculto; rescate habilitado.'
             : 'Ley N° 29733: teléfono privado y dirección del propietario protegidos.',
@@ -117,7 +88,7 @@ function PetQRCard({ codigo }) {
     return () => {
       active = false;
     };
-  }, [pet, isLost, demo]);
+  }, [pet, isLost]);
 
   const handleAskEmergencyAI = async (e, customQ = null) => {
     if (e) e.preventDefault();
@@ -126,7 +97,7 @@ function PetQRCard({ codigo }) {
     setEmergencyLoading(true);
     try {
       const res = await askEmergencyAssistantAI({
-        codigo_qr: demo ? undefined : pet.codigo,
+        codigo_qr: pet.codigo,
         petName: pet.nombre,
         especie: pet.especie,
         raza: pet.raza,
@@ -144,7 +115,7 @@ function PetQRCard({ codigo }) {
   };
 
   const handleSendLocation = () => {
-    if (!isLost || demo || gpsSending) return;
+    if (!isLost || gpsSending) return;
     setGpsError('');
     if (!navigator.geolocation) {
       setGpsError('Tu navegador no permite compartir la ubicación.');
@@ -251,7 +222,7 @@ function PetQRCard({ codigo }) {
           border: '1px solid rgba(255, 255, 255, 0.1)'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ color: '#CBD5E1', fontWeight: 600 }}>{demo ? 'Placa de demostración' : 'Estado de placa QR'}</span>
+            <span style={{ color: '#CBD5E1', fontWeight: 600 }}>Estado de placa QR</span>
             <span
               style={{
                 padding: '0.4rem 0.9rem',
@@ -712,8 +683,8 @@ function PetQRCard({ codigo }) {
                 </button>
               </form>
 
-              <a
-                href={emergencyGuide.boton_llamada_clinica?.tel || `tel:${pet.telClinica.replace(/[^0-9+]/g, '')}`}
+              {clinicPhone && <a
+                href={clinicPhone}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -732,8 +703,8 @@ function PetQRCard({ codigo }) {
                 }}
               >
                 <Icon name="phone" size={17} />
-                <span>{emergencyGuide.boton_llamada_clinica?.etiqueta || `Llamar Directo a Clínica (${pet.telClinica})`}</span>
-              </a>
+                <span>Llamar a la clínica · {pet.telClinica}</span>
+              </a>}
 
               <div style={{ marginTop: '0.55rem', fontSize: '0.7rem', color: '#94A3B8', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                 <Icon name="shield" size={13} />
@@ -837,10 +808,10 @@ function PetQRCard({ codigo }) {
               <span>{pet.clinica}</span>
             </div>
             <div style={{ color: '#94A3B8', fontSize: '0.75rem', marginBottom: '0.4rem' }}>
-              📍 {pet.dirClinica} · {pet.horarioClinica}
+              {pet.dirClinica}
             </div>
-            <a
-              href={`tel:${pet.telClinica.replace(/[^0-9+]/g, '')}`}
+            {clinicPhone && <a
+              href={clinicPhone}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -858,23 +829,16 @@ function PetQRCard({ codigo }) {
             >
               <Icon name="phone" size={15} />
               <span>Contactar Clínica: {pet.telClinica}</span>
-            </a>
+            </a>}
           </div>
         </div>
       </div>
 
-      <WhatsAppChatbotModal
+      <ClinicContactDialog
         isOpen={isChatbotOpen}
         onClose={() => setIsChatbotOpen(false)}
-        idMascota={pet.id_mascota || null}
-        idPropietario={pet.id_propietario || null}
         petName={pet.nombre}
-        ownerName={pet.propietario}
-        ownerPhone={isLost ? (pet.telefono || '') : ''}
-        petAllergies={pet.alergias}
-        mode={isLost ? 'rescue' : 'routine'}
-        vaccineName="Alerta de Rescate y Ubicación de Mascota"
-        dueDate="Reporte Inmediato"
+        rescuePhone={isLost ? pet.telefono : null}
         petCode={pet.codigo}
       />
     </div>

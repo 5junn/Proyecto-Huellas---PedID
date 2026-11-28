@@ -5,7 +5,7 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import CollarQRTag from '../components/CollarQRTag';
-import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
+import ClinicContactDialog from '../components/ClinicContactDialog';
 import { apiFetch } from '../services/apiClient';
 import { getRazasPorEspecie } from '../data/razasData';
 import { getVacunaSugerida, getListaVacunasPorEspecie } from '../data/vacunasData';
@@ -105,7 +105,7 @@ export default function RegisterPet({ user }) {
     }
   };
 
-  // Abrir el Chatbot oficial de WhatsApp para simular el recordatorio
+  // Abrir la guía del recordatorio registrado
   const handleOpenChatbot = () => {
     setIsChatbotOpen(true);
   };
@@ -251,7 +251,7 @@ export default function RegisterPet({ user }) {
                 }}
               >
                 <Icon name="whatsapp" size={18} />
-                <span>Abrir Chatbot HuellasBot 🐾</span>
+                <span>Contactar a la clínica</span>
               </button>
 
               <Link
@@ -553,7 +553,7 @@ export default function RegisterPet({ user }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#10B981' }}>
                     <Icon name="whatsapp" size={22} />
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#FFFFFF' }}>Recordatorios con Chatbot HuellasBot</h3>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#FFFFFF' }}>Recordatorios preventivos</h3>
                   </div>
                   <input
                     type="checkbox"
@@ -638,7 +638,7 @@ export default function RegisterPet({ user }) {
                       }}
                     >
                       <Icon name="whatsapp" size={18} />
-                      <span>🤖 Probar Asistente Chatbot WhatsApp (HuellasBot)</span>
+                      <span>Ver contacto de la clínica</span>
                     </button>
                   </div>
                 )}
@@ -712,13 +712,12 @@ export default function RegisterPet({ user }) {
         )}
       </main>
 
-      {/* MODAL DEL CHATBOT DE WHATSAPP (HUELLASBOT) */}
-      <WhatsAppChatbotModal
+      {/* CONTACTO DE LA CLÍNICA */}
+      <ClinicContactDialog
         isOpen={isChatbotOpen}
         onClose={() => setIsChatbotOpen(false)}
-        petName={petData.nombre || 'tu mascota'}
-        ownerName={user.nombres}
-        vaccineName={vaccineName}
+        petName={registeredPet?.nombre}
+        vaccineName={registeredPet?.id_recordatorio ? vaccineName : null}
         dueDate={`En ${reminderDays} días`}
         petCode={registeredPet?.codigoQR}
       />

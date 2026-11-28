@@ -6,7 +6,7 @@ import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import Logo from '../components/Logo';
 import CollarQRTag from '../components/CollarQRTag';
-import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
+import ClinicContactDialog from '../components/ClinicContactDialog';
 import { apiFetch } from '../services/apiClient';
 import { getRazasPorEspecie } from '../data/razasData';
 import '../styles/owner.css';
@@ -122,7 +122,7 @@ export default function OwnerDashboard({ user }) {
   const handleOpenWhatsAppReminder = (pet, vaccine) => {
     setWhatsAppTarget({
       pet,
-      vaccine: vaccine || { nombre: 'Vacunación General / Refuerzo', proxima: 'En 30 días' }
+      vaccine
     });
     setModalWhatsAppOpen(true);
   };
@@ -435,7 +435,7 @@ export default function OwnerDashboard({ user }) {
             <div className="hp-section-title-row">
               <div>
                 <h2>Mis Mascotas Protegidas ({mascotas.length})</h2>
-                <p>Haz clic en "Vista QR" para ver la placa del collar y simular su escaneo, o revisa su carnet y recordatorios por WhatsApp.</p>
+                <p>Haz clic en "Vista QR" para consultar y compartir la ficha del collar, o revisa su carnet y recordatorios por WhatsApp.</p>
               </div>
             </div>
 
@@ -629,17 +629,14 @@ export default function OwnerDashboard({ user }) {
               <button
                 type="button"
                 onClick={() => {
-                  setWhatsAppTarget({
-                    pet: mascotas[0] || { nombre: 'tu mascota', codigoQR: 'HP-4092' },
-                    vaccine: { nombre: 'Consulta Médica & Vacunación', proxima: 'Próxima semana' }
-                  });
+                  setWhatsAppTarget({ pet: null, vaccine: null });
                   setModalWhatsAppOpen(true);
                 }}
                 className="hp-btn-whatsapp-clinic"
                 style={{ border: 'none', cursor: 'pointer' }}
               >
                 <Icon name="whatsapp" size={18} />
-                <span>Agendar con HuellasBot (Chatbot)</span>
+                <span>Consultar con la clínica</span>
               </button>
             </div>
           </section>
@@ -830,7 +827,7 @@ export default function OwnerDashboard({ user }) {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.25rem' }}>
                         <span style={{ color: '#94A3B8' }}>Dueño:</span>
-                        <strong style={{ color: '#FFFFFF' }}>{selectedQRPet.propietario || user.nombres || 'Jorge Salas'}</strong>
+                        <strong style={{ color: '#FFFFFF' }}>{selectedQRPet.propietario || user.nombres || 'Sin nombre registrado'}</strong>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span style={{ color: '#94A3B8' }}>Distrito:</span>
@@ -914,7 +911,7 @@ export default function OwnerDashboard({ user }) {
                       Clínica Veterinaria Huellas (Surco, Lima)
                     </strong>
                     <span style={{ fontSize: '0.72rem', color: '#94A3B8' }}>
-                      Av. Primavera 1234 · Emergencias 24/7 · Tel: +51 987 654 321
+                      <Link to="/emergencias">Ver contacto de atención</Link>
                     </span>
                   </div>
                 </div>
@@ -963,20 +960,15 @@ export default function OwnerDashboard({ user }) {
       )}
 
       {/* ========================================================
-          MODAL 2: CHATBOT OFICIAL DE WHATSAPP (HUELLASBOT)
+          MODAL 2: CONTACTO DE LA CLÍNICA
          ======================================================== */}
-      <WhatsAppChatbotModal
+      <ClinicContactDialog
         isOpen={modalWhatsAppOpen}
         onClose={() => setModalWhatsAppOpen(false)}
-        idMascota={whatsAppTarget.pet?.id_mascota || null}
-        idPropietario={whatsAppTarget.pet?.id_propietario || user.id_propietario || null}
-        petName={whatsAppTarget.pet?.nombre || 'tu mascota'}
-        ownerName={user.nombres || 'Propietario'}
-        ownerPhone={user.telefono || whatsAppTarget.pet?.telefono || '976543210'}
-        petAllergies={whatsAppTarget.pet?.alergias || ''}
-        vaccineName={whatsAppTarget.vaccine?.nombre || 'Vacuna de Refuerzo'}
-        dueDate={whatsAppTarget.vaccine?.proxima || 'En 30 días'}
-        petCode={whatsAppTarget.pet?.codigoQR || 'HP-4092'}
+        petName={whatsAppTarget.pet?.nombre}
+        vaccineName={whatsAppTarget.vaccine?.nombre}
+        dueDate={whatsAppTarget.vaccine?.proxima}
+        petCode={whatsAppTarget.pet?.codigoQR}
       />
 
       {/* ========================================================

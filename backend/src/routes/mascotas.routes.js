@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { sanitizeText } = require('../utils/security');
+const { clinicToday, daysBetween, validDay, vaccineStatus, displayDate } = require('../utils/clinicDates');
 const { sendLostPetAlert } = require('../services/messagingService');
 const { STAFF_ROLES, OWNER_ROLES, RECEPTION_ROLES, requireSession, allowRoles } = require('../utils/session');
 
@@ -22,6 +23,23 @@ function parseWeightKg(peso) {
   if (peso === null || peso === undefined || peso === '') return null;
   const num = Number(String(peso).trim().replace(/ kg$/i, '').replace(',', '.'));
   return Number.isFinite(num) && num > 0 && num <= 999.99 ? num : null;
+}
+
+const VACCINE_DATES = `DATE_FORMAT(fecha_aplicacion, '%Y-%m-%d') AS aplicada_el,
+  DATE_FORMAT(fecha_proximo_refuerzo, '%Y-%m-%d') AS refuerzo_el`;
+const VACCINE_LABELS = { 'por-vencer': 'Por vencer', vencida: 'Vencida', 'al-dia': 'Vigente' };
+
+function formatVaccine(row, today) {
+  const status = validDay(row.refuerzo_el) ? vaccineStatus(daysBetween(today, row.refuerzo_el)) : null;
+  return {
+    nombre: row.vacuna,
+    fecha: validDay(row.aplicada_el) ? displayDate.format(new Date(row.aplicada_el)) : 'Sin fecha registrada',
+    proxima: status ? displayDate.format(new Date(row.refuerzo_el)) : 'Sin fecha registrada',
+    estado: VACCINE_LABELS[status] || 'Sin refuerzo registrado',
+    vet: row.veterinario_nombre || 'Sin profesional registrado',
+    estado_dosis: status,
+    fecha_proximo_refuerzo: row.refuerzo_el,
+  };
 }
 
 /**
@@ -67,28 +85,20 @@ router.get('/', petAccess, async (req, res) => {
     const [mascotas] = await db.queryAsync(sql, params);
     const [vacunas] = mascotas.length
       ? await db.queryAsync(
-        'SELECT * FROM carnet_vacunacion WHERE id_mascota IN (?) ORDER BY fecha_aplicacion DESC, id_vacunacion DESC',
+        `SELECT *, ${VACCINE_DATES} FROM carnet_vacunacion
+         WHERE id_mascota IN (?) ORDER BY fecha_aplicacion DESC, id_vacunacion DESC`,
         [mascotas.map((m) => m.id_mascota)]
       )
       : [[]];
 
     const vacunasByPet = new Map();
-    for (const v of vacunas) {
-      if (!vacunasByPet.has(v.id_mascota)) vacunasByPet.set(v.id_mascota, []);
-      vacunasByPet.get(v.id_mascota).push({
-        id_vacunacion: v.id_vacunacion,
-        nombre: v.vacuna,
-        lote: v.lote_fabricante,
-        fecha: v.fecha_aplicacion
-          ? new Date(v.fecha_aplicacion).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
-          : 'Registrada',
-        proxima: v.fecha_proximo_refuerzo
-          ? new Date(v.fecha_proximo_refuerzo).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })
-          : 'Anual',
-        fecha_proximo_refuerzo: v.fecha_proximo_refuerzo,
-        estado: v.estado_dosis === 'por-vencer' ? 'Por Vencer' : v.estado_dosis === 'vencida' ? 'Vencida' : 'Vigente',
-        estado_dosis: v.estado_dosis,
-        vet: v.veterinario_nombre || 'Equipo Clínica Huellas',
+    const today = clinicToday();
+    for (const vaccine of vacunas) {
+      if (!vacunasByPet.has(vaccine.id_mascota)) vacunasByPet.set(vaccine.id_mascota, []);
+      vacunasByPet.get(vaccine.id_mascota).push({
+        ...formatVaccine(vaccine, today),
+        id_vacunacion: vaccine.id_vacunacion,
+        lote: vaccine.lote_fabricante,
       });
     }
 
@@ -112,6 +122,24 @@ router.get('/', petAccess, async (req, res) => {
   } catch (err) {
     console.error('Error al consultar mascotas:', err);
     res.status(500).json({ error: 'Error en el servidor', detalles: err.message });
+  }
+});
+
+// El reporte aparece en el panel aunque aún no exista un escaneo con GPS.
+router.get('/reportes/extravios', requireSession, allowRoles(STAFF_ROLES), async (req, res) => {
+  try {
+    const [rows] = await db.queryAsync(
+      `SELECT m.id_mascota, m.codigo_qr AS codigoQR, m.nombre, m.especie, m.raza,
+              p.nombres AS propietario
+       FROM mascotas m
+       INNER JOIN propietarios p ON p.id_propietario = m.id_propietario
+       WHERE m.modo_extraviado = 1
+       ORDER BY m.id_mascota DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error('[Mascotas extraviadas GET]', err.code || err.name);
+    res.status(500).json({ error: 'No se pudieron cargar los reportes de extravío.' });
   }
 });
 
@@ -212,11 +240,12 @@ router.get('/:codigo', async (req, res) => {
 
     const m = rows[0];
     const [vacunas] = await db.queryAsync(
-      'SELECT * FROM carnet_vacunacion WHERE id_mascota = ? ORDER BY fecha_aplicacion DESC',
+      `SELECT *, ${VACCINE_DATES} FROM carnet_vacunacion WHERE id_mascota = ? ORDER BY fecha_aplicacion DESC`,
       [m.id_mascota]
     );
 
     const isLost = Boolean(m.modo_extraviado);
+    const today = clinicToday();
     const fullAddress = m.propietario_direccion || 'Lima, Perú';
     const districtOnly = fullAddress.includes(',') ? fullAddress.split(',').slice(-1)[0].trim() : null;
 
@@ -226,7 +255,7 @@ router.get('/:codigo', async (req, res) => {
       nombre: m.nombre,
       especie: m.especie,
       raza: m.raza_nombre,
-      edad: m.edad || 'Adulto',
+      edad: m.edad || 'Sin registrar',
       sexo: m.sexo,
       peso: m.peso_actual ? `${m.peso_actual} kg` : 'N/A',
       color: m.color || 'No especificado',
@@ -239,16 +268,13 @@ router.get('/:codigo', async (req, res) => {
       telefono: isLost ? m.propietario_telefono : null,
       distrito: isLost ? districtOnly : null,
       clinica: process.env.CLINIC_NAME || 'Clínica Veterinaria Huellas',
-      dirClinica: process.env.CLINIC_ADDRESS || 'Av. Primavera 1234, Santiago de Surco, Lima',
-      telClinica: process.env.CLINIC_PHONE || '+51 987 654 321',
+      dirClinica: process.env.CLINIC_ADDRESS?.trim() || null,
+      telClinica: process.env.CLINIC_PHONE?.trim() || null,
       horarioClinica: 'Lunes a Domingo · Emergencias 24/7',
-      vacunas: vacunas.map((v) => ({
-        nombre: v.vacuna,
-        fecha: new Date(v.fecha_aplicacion).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }),
-        proxima: new Date(v.fecha_proximo_refuerzo).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }),
-        estado: v.estado_dosis === 'por-vencer' ? 'Por Vencer' : v.estado_dosis === 'vencida' ? 'Vencida' : 'Vigente',
-        vet: v.veterinario_nombre || 'Equipo Médico Huellas',
-      })),
+      vacunas: vacunas.map((vaccine) => {
+        const { nombre, fecha, proxima, estado, vet } = formatVaccine(vaccine, today);
+        return { nombre, fecha, proxima, estado, vet };
+      }),
     });
   } catch (err) {
     console.error('Error consultando ficha QR:', err);
@@ -308,8 +334,8 @@ router.post('/', requireSession, allowRoles([...RECEPTION_ROLES, ...OWNER_ROLES]
       const [[razaRow]] = await conn.query('SELECT id_raza FROM razas WHERE nombre_raza = ? AND especie = ? LIMIT 1', [raza, especie]);
       const [pet] = await conn.query(
         `INSERT INTO mascotas
-         (id_propietario, id_raza, codigo_qr, microchip, nombre, especie, raza, sexo, edad, fecha_nacimiento, peso_actual, color, foto_url, alergias)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id_propietario, id_raza, codigo_qr, microchip, nombre, especie, raza, sexo, edad, fecha_nacimiento, peso_actual, color, foto_url, alergias, recompensa)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         [
           ownerId, razaRow?.id_raza || null, codigoQR, microchip, nombre, especie, raza, sexo,
           sanitizeText(body.edad, 50) || null, body.fecha_nacimiento || null, peso,

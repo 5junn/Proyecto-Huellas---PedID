@@ -11,7 +11,7 @@ function whatsappTestNumber() {
 
 /**
  * Envía un mensaje a través de proveedores externos configurados (Meta WhatsApp Cloud API,
- * Twilio WhatsApp/SMS, Resend Email, o Webhook), con respaldo seguro en modo gateway local.
+ * Twilio WhatsApp/SMS, Resend Email o Webhook).
  */
 async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmail, subject, message, html }) {
   const cleanPhone = normalizePhone(toPhone);
@@ -46,7 +46,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
     return {
       ok: true,
       providerName: 'Resend Email API',
-      providerMessageId: data.id || `EMAIL-${Date.now()}`,
+      providerMessageId: data.id || null,
       external: true,
     };
   }
@@ -95,7 +95,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
     return {
       ok: true,
       providerName: 'Meta WhatsApp Cloud API',
-      providerMessageId: data.messages?.[0]?.id || `WAMETA-${Date.now()}`,
+      providerMessageId: data.messages?.[0]?.id || null,
       external: true,
     };
   }
@@ -133,7 +133,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
       return {
         ok: true,
         providerName: `Twilio ${canal} API`,
-        providerMessageId: data.sid || `TW-${Date.now()}`,
+        providerMessageId: data.sid || null,
         external: true,
       };
     }
@@ -160,7 +160,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
     return {
       ok: true,
       providerName: 'External Messaging Webhook',
-      providerMessageId: `WHK-${Date.now()}`,
+      providerMessageId: null,
       external: true,
     };
   }
@@ -368,14 +368,14 @@ async function dispatchMessage({
  */
 async function sendWelcomeMessage({ id_propietario, nombres, telefono, correo }) {
   const clinicName = process.env.CLINIC_NAME || 'Clínica Veterinaria Huellas';
-  const clinicPhone = process.env.CLINIC_PHONE || '+51 987 654 321';
+  const clinicPhone = process.env.CLINIC_PHONE?.trim();
   const primerNombre = (nombres || 'Propietario').split(' ')[0];
 
   const mensaje =
     `🐾 ¡Bienvenido(a) a *Huellas PetID*, ${primerNombre}!\n\n` +
     `Tu registro en *${clinicName}* se completó con éxito.\n` +
     `Desde ahora recibirás recordatorios automáticos de vacunas, alertas preventivas y avisos de rescate QR en este número.\n\n` +
-    `🏥 Central de atención 24/7: *${clinicPhone}*`;
+    (clinicPhone ? `🏥 Central de atención: *${clinicPhone}*` : '🏥 Consulta las opciones de contacto de la clínica en Huellas PetID.');
 
   return dispatchMessage({
     id_propietario,
@@ -469,7 +469,7 @@ async function processScheduledAndDueReminders({ diasAnticipacion = 15, soloVenc
       `🔔 *${v.mascota_nombre}* (${v.codigo_qr}) tiene próximo refuerzo de:\n` +
       `💉 *${v.vacuna}*\n` +
       `📅 Fecha programada: *${dueStr}*\n\n` +
-      `Responde este mensaje o llámanos al *+51 987 654 321* para confirmar su atención.`;
+      'Responde este mensaje para consultar la disponibilidad de la clínica.';
 
     await db.queryAsync(
       `INSERT INTO recordatorios
