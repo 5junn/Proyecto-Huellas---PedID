@@ -13,7 +13,7 @@ function whatsappTestNumber() {
  * Envía un mensaje a través de proveedores externos configurados (Meta WhatsApp Cloud API,
  * Twilio WhatsApp/SMS, Resend Email, o Webhook), con respaldo seguro en modo gateway local.
  */
-async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmail, subject, message }) {
+async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmail, subject, message, html }) {
   const cleanPhone = normalizePhone(toPhone);
   const testNumber = canal === 'WhatsApp' ? whatsappTestNumber() : null;
   if (testNumber && cleanPhone !== testNumber) {
@@ -36,6 +36,7 @@ async function sendThroughExternalProvider({ canal = 'WhatsApp', toPhone, toEmai
         to: [toEmail],
         subject: cleanSubject,
         text,
+        ...(html ? { html } : {}),
       }),
     });
     const data = await resp.json().catch(() => ({}));
