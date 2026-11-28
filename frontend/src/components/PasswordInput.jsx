@@ -9,6 +9,9 @@ export default function PasswordInput({
   onChange,
   placeholder = 'Ingresa tu contraseña',
   required = true,
+  disabled,
+  minLength,
+  maxLength,
   autoComplete = 'current-password'
 }) {
   const [visible, setVisible] = useState(false);
@@ -34,12 +37,16 @@ export default function PasswordInput({
           onChange={onChange}
           placeholder={placeholder}
           required={required}
+          disabled={disabled}
+          minLength={minLength}
+          maxLength={maxLength}
           autoComplete={autoComplete}
         />
 
         <button
           type="button"
           className="password-toggle-btn"
+          disabled={disabled}
           onClick={() => setVisible((prev) => !prev)}
           aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
         >

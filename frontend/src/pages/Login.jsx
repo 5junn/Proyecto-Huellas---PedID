@@ -160,6 +160,14 @@ export default function Login() {
           placeholder="Ingresa tu clave de acceso"
         />
 
+        <Link
+          to={isStaffPortal ? '/recuperar-contrasena?portal=staff' : '/recuperar-contrasena'}
+          state={{ correo: formData.correo }}
+          className="auth-switch-link auth-forgot-link"
+        >
+          ¿Olvidaste tu contraseña?
+        </Link>
+
         <button type="submit" className="btn-primary-gradient" disabled={loading}>
           {loading ? (
             <>

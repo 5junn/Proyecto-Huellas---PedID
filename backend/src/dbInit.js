@@ -11,11 +11,14 @@ const SCHEMA_STATEMENTS = [
     INDEX (vence_en)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  'CREATE TABLE IF NOT EXISTS verificaciones_recuperacion LIKE verificaciones_registro',
+
   `CREATE TABLE IF NOT EXISTS usuarios (
     id_usuario INT AUTO_INCREMENT PRIMARY KEY,
     nombres VARCHAR(120) NOT NULL,
     correo VARCHAR(120) NOT NULL UNIQUE,
     contrasena_cifrada VARCHAR(255) NOT NULL,
+    version_sesion INT UNSIGNED NOT NULL DEFAULT 0,
     rol ENUM('Administrador', 'Veterinario', 'Recepcionista', 'Propietario') NOT NULL DEFAULT 'Propietario',
     dni VARCHAR(20) DEFAULT NULL,
     telefono VARCHAR(30) DEFAULT NULL,
@@ -173,6 +176,7 @@ const SCHEMA_STATEMENTS = [
 ];
 
 const SAFE_ALTERS = [
+  'ALTER TABLE usuarios ADD COLUMN version_sesion INT UNSIGNED NOT NULL DEFAULT 0',
   'ALTER TABLE usuarios ADD COLUMN dni VARCHAR(20) DEFAULT NULL',
   'ALTER TABLE usuarios ADD COLUMN telefono VARCHAR(30) DEFAULT NULL',
   'ALTER TABLE usuarios ADD COLUMN direccion VARCHAR(255) DEFAULT NULL',

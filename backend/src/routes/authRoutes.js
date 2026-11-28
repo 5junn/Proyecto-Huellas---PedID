@@ -3,6 +3,7 @@ const { rateLimit } = require('express-rate-limit');
 const router = express.Router();
 const db = require('../db');
 const {
+  DEMO_SEED_HASH,
   hashPassword,
   verifyPassword,
   signToken,
@@ -11,15 +12,18 @@ const {
   isValidEmail,
 } = require('../utils/security');
 const { sendWelcomeMessage } = require('../services/messagingService');
-const { requestRegistrationCode, verifyRegistrationCode } = require('../services/registrationCodeService');
+const {
+  emailCodesConfigured, requestRegistrationCode, verifyRegistrationCode,
+  requestPasswordResetCode, verifyPasswordResetCode,
+} = require('../services/emailCodeService');
 
 const {
   STAFF_ROLES, OWNER_ROLES, RECEPTION_ROLES,
   findActiveUser, publicUser, requireSession, allowRoles,
 } = require('../utils/session');
 
-function createSession(usuario) {
-  return { success: true, token: signToken({ id: usuario.id, sessionVersion: 2 }), usuario };
+function createSession(usuario, revision = 0) {
+  return { success: true, token: signToken({ id: usuario.id, sessionVersion: 2, revision }), usuario };
 }
 
 const authLimiter = rateLimit({
@@ -50,6 +54,74 @@ router.post('/register/code', codeLimiter, async (req, res) => {
   } catch (err) {
     console.error('[Auth Registro: código]', err.code || err.name);
     return res.status(500).json({ message: 'No se pudo preparar el código. Intenta de nuevo.' });
+  }
+});
+
+function matchingRecoveryAccount(account, correo) {
+  return account?.correo.trim().toLowerCase() === correo &&
+    account.contrasena_cifrada !== DEMO_SEED_HASH;
+}
+
+router.post('/password-reset/code', codeLimiter, async (req, res) => {
+  const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
+  if (!isValidEmail(correo)) {
+    return res.status(400).json({ message: 'Ingresa un correo electrónico válido.' });
+  }
+  if (!emailCodesConfigured()) {
+    return res.status(503).json({ message: 'La recuperación por correo no está disponible en este momento.' });
+  }
+  try {
+    const account = await findActiveUser('correo', correo);
+    if (matchingRecoveryAccount(account, correo)) {
+      // La respuesta pública es la misma aunque el proveedor tarde o el correo no exista.
+      void requestPasswordResetCode(correo, account)
+        .then(({ status }) => {
+          if (status === 502) console.warn('[Auth Recuperación] Resend rechazó el envío.');
+        })
+        .catch((error) => console.error('[Auth Recuperación: código]', error.code || error.name));
+    }
+    return res.status(202).json({
+      message: 'Si hay una cuenta activa con ese correo, recibirás un código válido por 10 minutos.',
+    });
+  } catch (error) {
+    console.error('[Auth Recuperación: solicitud]', error.code || error.name);
+    return res.status(503).json({ message: 'No se pudo iniciar la recuperación. Intenta de nuevo.' });
+  }
+});
+
+router.post('/password-reset', authLimiter, async (req, res) => {
+  const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
+  const { codigo, password } = req.body || {};
+  if (!isValidEmail(correo) || typeof codigo !== 'string' || !/^\d{6}$/.test(codigo)) {
+    return res.status(400).json({ message: 'Ingresa tu correo y el código de seis dígitos.' });
+  }
+  if (typeof password !== 'string' || password.length < 12 || password.length > 128) {
+    return res.status(400).json({ message: 'Elige una contraseña de 12 a 128 caracteres.' });
+  }
+  try {
+    const changed = await db.withTransaction(async (conn) => {
+      const [[account]] = await conn.query(
+        `SELECT id_usuario, correo, contrasena_cifrada, version_sesion
+         FROM usuarios WHERE correo = ? AND estado = 'activo' LIMIT 1 FOR UPDATE`,
+        [correo]
+      );
+      if (!matchingRecoveryAccount(account, correo)) return false;
+      if (!await verifyPasswordResetCode(conn, correo, codigo, account)) return false;
+
+      await conn.query(
+        'UPDATE usuarios SET contrasena_cifrada = ?, version_sesion = version_sesion + 1 WHERE id_usuario = ?',
+        [hashPassword(password), account.id_usuario]
+      );
+      await conn.query('DELETE FROM verificaciones_recuperacion WHERE correo = ?', [correo]);
+      return true;
+    });
+    if (!changed) {
+      return res.status(400).json({ message: 'Código incorrecto, vencido o con demasiados intentos. Puedes solicitar otro.' });
+    }
+    return res.json({ message: 'Tu contraseña se actualizó. Ya puedes iniciar sesión.' });
+  } catch (error) {
+    console.error('[Auth Recuperación: confirmación]', error.code || error.name);
+    return res.status(500).json({ message: 'No se pudo actualizar la contraseña. Intenta de nuevo.' });
   }
 });
 
@@ -224,7 +296,7 @@ router.post('/login', authLimiter, async (req, res) => {
       return res.status(403).json({ message: 'Tu cuenta aún no está vinculada a un perfil de propietario.' });
     }
 
-    return res.json(createSession(usuario));
+    return res.json(createSession(usuario, userRow.version_sesion));
   } catch (err) {
     console.error('[Auth Login]', err.code || err.name);
     return res.status(500).json({ message: 'Error al iniciar sesión.' });

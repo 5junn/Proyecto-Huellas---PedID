@@ -46,7 +46,8 @@ async function requireSession(req, res, next) {
 
   try {
     const row = await findActiveUser('id', token.id);
-    if (!row || row.contrasena_cifrada === DEMO_SEED_HASH) {
+    if (!row || row.contrasena_cifrada === DEMO_SEED_HASH ||
+        (token.revision ?? 0) !== row.version_sesion) {
       return res.status(401).json({ message: 'Tu sesión ya no está disponible. Vuelve a iniciar sesión.' });
     }
     req.user = publicUser(row);

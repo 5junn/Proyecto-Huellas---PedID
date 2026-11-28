@@ -15,7 +15,7 @@ async function provisionAdmin() {
   const hash = hashPassword(password);
   if (resetPassword) {
     const [result] = await db.queryAsync(
-      "UPDATE usuarios SET contrasena_cifrada = ?, estado = 'activo' WHERE correo = ? AND rol = 'Administrador'",
+      "UPDATE usuarios SET contrasena_cifrada = ?, version_sesion = version_sesion + 1, estado = 'activo' WHERE correo = ? AND rol = 'Administrador'",
       [hash, correo]
     );
     if (!result.affectedRows) throw new Error('No existe un administrador con ese correo.');
