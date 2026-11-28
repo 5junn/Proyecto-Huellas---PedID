@@ -1,10 +1,13 @@
 const mysql = require('mysql2');
-require('dotenv').config();
+const { loadBackendEnv, mysqlPassword } = require('./env');
+
+const localEnv = loadBackendEnv();
+const password = mysqlPassword(process.env, localEnv);
 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || process.env.MYSQLHOST || 'localhost',
   user: process.env.DB_USER || process.env.MYSQLUSER || 'root',
-  password: process.env.DB_PASSWORD ?? process.env.MYSQLPASSWORD ?? '',
+  password,
   database: process.env.DB_NAME || process.env.MYSQLDATABASE || 'huellas_petid',
   port: Number(process.env.DB_PORT || process.env.MYSQLPORT) || 3306,
   waitForConnections: true,
@@ -49,6 +52,11 @@ async function checkConnection() {
     return true;
   } catch (err) {
     console.warn('MySQL no disponible:', err.message);
+    if (err.code === 'ER_ACCESS_DENIED_ERROR' && !password) {
+      console.warn(localEnv.found
+        ? `[MySQL] No se cargó una contraseña. Revisa que DB_PASSWORD tenga un valor y aparezca una sola vez en ${localEnv.filePath}.`
+        : `[MySQL] No se encontró ${localEnv.filePath}. Crea ese archivo y configura DB_PASSWORD.`);
+    }
     return false;
   }
 }

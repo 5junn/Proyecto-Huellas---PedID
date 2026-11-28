@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const { rateLimit } = require('express-rate-limit');
 const os = require('os');
-require('dotenv').config();
 
 const db = require('./src/db');
 const { initDatabase } = require('./src/dbInit');
