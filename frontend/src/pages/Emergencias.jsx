@@ -4,16 +4,35 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import Logo from '../components/Logo';
-import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
+import ClinicContactDialog from '../components/ClinicContactDialog';
+import { clinicWhatsApp, phoneLink, useClinicContact } from '../services/clinicContact';
 import '../styles/landing.css';
 
 export default function Emergencias() {
   const [isChatbotOpen, setIsChatbotOpen] = useState(false);
-  const [emergencyGpsStatus, setEmergencyGpsStatus] = useState(false);
+  const { contact, loading, error } = useClinicContact();
+  const [findingLocation, setFindingLocation] = useState(false);
+  const [location, setLocation] = useState('');
+  const [gpsError, setGpsError] = useState('');
+  const clinicPhone = phoneLink(contact?.telefono);
+  const locationChat = location && clinicWhatsApp(contact?.whatsapp, `Hola, necesito atención veterinaria. Mi ubicación es ${location}`);
 
   const handleShareGps = () => {
-    setEmergencyGpsStatus(true);
-    setTimeout(() => setEmergencyGpsStatus(false), 4000);
+    setLocation('');
+    setGpsError('');
+    if (!navigator.geolocation) {
+      setGpsError('Tu navegador no permite obtener la ubicación.');
+      return;
+    }
+    setFindingLocation(true);
+    navigator.geolocation.getCurrentPosition(({ coords }) => {
+      const point = `${coords.latitude},${coords.longitude}`;
+      setLocation(`https://www.google.com/maps?q=${encodeURIComponent(point)}`);
+      setFindingLocation(false);
+    }, () => {
+      setGpsError('No se pudo obtener tu ubicación. Revisa los permisos del navegador.');
+      setFindingLocation(false);
+    }, { timeout: 10000 });
   };
 
   return (
@@ -73,8 +92,8 @@ export default function Emergencias() {
 
           {/* BOTONES DE ACCIÓN RÁPIDA DE EMERGENCIA */}
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <a
-              href="tel:+51987654321"
+            {clinicPhone && <a
+              href={clinicPhone}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -91,8 +110,8 @@ export default function Emergencias() {
               }}
             >
               <Icon name="phone" size={22} />
-              <span>Llamar a Emergencias: +51 987 654 321</span>
-            </a>
+              <span>Llamar a la clínica · {contact.telefono}</span>
+            </a>}
 
             <button
               type="button"
@@ -114,7 +133,7 @@ export default function Emergencias() {
               }}
             >
               <Icon name="whatsapp" size={22} />
-              <span>Triage Inmediato con HuellasBot</span>
+              <span>Ver contacto de la clínica</span>
             </button>
           </div>
         </div>
@@ -305,12 +324,13 @@ export default function Emergencias() {
             Clínica Veterinaria Huellas · Sede Central de Emergencias
           </h3>
           <p style={{ color: '#CBD5E1', fontSize: '0.95rem', margin: '0.4rem 0 1.2rem' }}>
-            📍 Av. Primavera 1234, Santiago de Surco, Lima - Perú · Atención Continua 24 Horas
+            {contact?.direccion || (!loading && !error && 'Dirección de la clínica sin configurar')}
+            {error && <span role="alert">{error}</span>}
           </p>
 
           <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-            <a
-              href="https://maps.google.com/?q=Av.+Primavera+1234+Santiago+de+Surco+Lima"
+            {contact?.direccion && <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.direccion)}`}
               target="_blank"
               rel="noopener noreferrer"
               style={{
@@ -327,12 +347,13 @@ export default function Emergencias() {
               }}
             >
               <Icon name="pin" size={17} />
-              <span>Abrir en Google Maps / Waze ↗</span>
-            </a>
+              <span>Abrir en Google Maps ↗</span>
+            </a>}
 
             <button
               type="button"
               onClick={handleShareGps}
+              disabled={findingLocation}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -348,21 +369,18 @@ export default function Emergencias() {
               }}
             >
               <Icon name="pin" size={17} />
-              <span>{emergencyGpsStatus ? '✓ ¡Coordenadas GPS enviadas a la Central!' : 'Transmitir mi Ubicación a la Central'}</span>
+              <span>{findingLocation ? 'Buscando ubicación…' : 'Obtener enlace de mi ubicación'}</span>
             </button>
           </div>
+          {gpsError && <p role="alert">{gpsError}</p>}
+          {location && <p>
+            <a href={location} target="_blank" rel="noreferrer">Ver mi ubicación en el mapa</a>
+            {locationChat && <> · <a href={locationChat} target="_blank" rel="noreferrer">Abrir WhatsApp para compartirla</a></>}
+          </p>}
         </section>
       </main>
 
-      <WhatsAppChatbotModal
-        isOpen={isChatbotOpen}
-        onClose={() => setIsChatbotOpen(false)}
-        petName="tu mascota"
-        ownerName="Propietario"
-        vaccineName="Alerta de Triage y Urgencia 24/7"
-        dueDate="Atención Inmediata"
-        petCode="EMERGENCIA-24H"
-      />
+      <ClinicContactDialog isOpen={isChatbotOpen} onClose={() => setIsChatbotOpen(false)} />
 
       <Footer />
     </div>

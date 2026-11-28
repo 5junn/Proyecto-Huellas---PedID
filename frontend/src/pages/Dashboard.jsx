@@ -1,10 +1,13 @@
 // src/pages/Dashboard.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { logout } from '../services/authService';
 import Logo from '../components/Logo';
 import Icon from '../components/Icon';
-import { BarChart, Donut } from '../components/Charts';
+import ReceptionOverview from '../components/ReceptionOverview';
+import DashboardCharts from '../components/DashboardCharts';
+import LostPetReports from '../components/LostPetReports';
+import VaccineInventory from '../components/VaccineInventory';
 import { getRazasPorEspecie } from '../data/razasData';
 import { apiFetch } from '../services/apiClient';
 import {
@@ -33,7 +36,7 @@ const MENU = [
   {
     group: 'Administración',
     items: [
-      { id: 'usuarios', icon: 'user', label: 'Usuarios Staff', roles: ['Administrador'] },
+      { id: 'usuarios', icon: 'user', label: 'Cuentas de usuario', roles: ['Administrador'] },
     ]
   },
 ];
@@ -45,12 +48,14 @@ const SECTIONS = {
   consultas: { title: 'Consultas Médicas', desc: 'Historias clínicas, diagnósticos, recetas y atención del día.' },
   vacunas: { title: 'Carnets & Vacunación', desc: 'Registro de vacunas aplicadas, lotes y próximos refuerzos.' },
   recordatorios: { title: 'Avisos Automáticos', desc: 'Notificaciones por WhatsApp y SMS enviadas a propietarios.' },
-  usuarios: { title: 'Personal Clínico', desc: 'Cuentas institucionales, roles y control de acceso del personal.' },
+  usuarios: { title: 'Cuentas de usuario', desc: 'Cuentas de propietarios y personal registradas en Huellas PetID.' },
 };
 
 const STATUS_TEXT = { done: 'Atendida', progress: 'En curso', waiting: 'En espera' };
 
-const SPECIES_COLORS = ['#38BDF8', '#A78BFA', '#34D399', '#FBBF24', '#FB7185'];
+const VACCINE_STATUS = { 'al-dia': 'Vigente', 'por-vencer': 'Por vencer', vencida: 'Vencida' };
+const EMPTY_OWNER = { nombres: '', dni: '', correo: '', telefono: '', direccion: '' };
+const EMPTY_BATCH = { vacuna: '', lote_fabricante: '', fecha_vencimiento: '', dosis_iniciales: '' };
 const dateKey = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Lima' });
 
 export default function Dashboard({ user: currentUser }) {
@@ -69,7 +74,6 @@ export default function Dashboard({ user: currentUser }) {
     }
   });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [chartRange, setChartRange] = useState('week');
   const [today, setToday] = useState(() => dateKey.format(new Date()));
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -79,18 +83,25 @@ export default function Dashboard({ user: currentUser }) {
   const [vacunas, setVacunas] = useState([]);
   const [propietarios, setPropietarios] = useState([]);
   const [recordatorios, setRecordatorios] = useState([]);
-  const [personal, setPersonal] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [lostPets, setLostPets] = useState([]);
   const [gpsAlerts, setGpsAlerts] = useState([]);
   const [metrics, setMetrics] = useState(null);
-  const [loadError, setLoadError] = useState('');
+  const [loadErrors, setLoadErrors] = useState([]);
   const [pending, setPending] = useState(true);
+  const [alertsPending, setAlertsPending] = useState(true);
+  const latestLoad = useRef(0);
+  const latestAlerts = useRef(0);
 
   const [predictiveAlerts, setPredictiveAlerts] = useState(null);
   const [clinicalSummary, setClinicalSummary] = useState(null);
   const [loadingAI, setLoadingAI] = useState(false);
   const [modalConsultaOpen, setModalConsultaOpen] = useState(false);
   const [modalVacunaOpen, setModalVacunaOpen] = useState(false);
+  const [modalBatchOpen, setModalBatchOpen] = useState(false);
   const [modalStaffOpen, setModalStaffOpen] = useState(false);
+  const [modalOwnerOpen, setModalOwnerOpen] = useState(false);
   const [modalPetOpen, setModalPetOpen] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
   const [modalAlertasOpen, setModalAlertasOpen] = useState(false);
@@ -99,43 +110,82 @@ export default function Dashboard({ user: currentUser }) {
   const [formError, setFormError] = useState('');
 
   const loadAllFromBackend = React.useCallback(async (signal) => {
+    const version = ++latestLoad.current;
     const requests = [
-      ['/clinica/dashboard', setMetrics],
-      ['/mascotas', setMascotas],
-      ['/mascotas/alertas-gps', setGpsAlerts],
+      ['/mascotas', 'Mascotas', setMascotas],
+      ['/clinica/dashboard', 'Indicadores', setMetrics],
     ];
-    if (clinical) requests.push(['/clinica/consultas', setConsultas], ['/clinica/vacunas', setVacunas]);
-    if (reception) requests.push(['/auth/propietarios', setPropietarios], ['/mensajeria/recordatorios', setRecordatorios]);
-    if (isAdmin) requests.push(['/auth/staff', setPersonal]);
+    if (clinical) requests.push(
+      ['/clinica/consultas', 'Consultas', setConsultas],
+      ['/clinica/vacunas', 'Vacunas', setVacunas],
+      ['/clinica/lotes-vacunas', 'Lotes de vacunas', setBatches]
+    );
+    if (reception) requests.push(
+      ['/auth/propietarios', 'Propietarios', setPropietarios],
+      ['/mensajeria/recordatorios', 'Recordatorios', setRecordatorios]
+    );
+    if (isAdmin) requests.push(['/auth/usuarios', 'Cuentas de usuario', setAccounts]);
 
     const results = await Promise.allSettled(requests.map(([path]) => apiFetch(path, { signal })));
-    if (signal?.aborted) return;
+    if (signal?.aborted || version !== latestLoad.current) return;
+
+    const errors = [];
     results.forEach((result, index) => {
-      if (result.status === 'fulfilled') requests[index][1](result.value);
+      const [path, label, setValue] = requests[index];
+      if (result.status === 'fulfilled') setValue(result.value);
+      else errors.push({ path, label, message: result.reason?.message || 'Error al cargar los datos.' });
     });
-    setLoadError(results.find((result) => result.status === 'rejected')?.reason.message || '');
+    const paths = new Set(requests.map(([path]) => path));
+    setLoadErrors((previous) => [...previous.filter(({ path }) => !paths.has(path)), ...errors]);
     setToday(dateKey.format(new Date()));
     setPending(false);
   }, [clinical, reception, isAdmin]);
 
+  const refreshAlerts = React.useCallback(async (signal) => {
+    const version = ++latestAlerts.current;
+    const requests = [
+      ['/mascotas/reportes/extravios', 'Mascotas extraviadas', setLostPets],
+      ['/mascotas/alertas-gps', 'Alertas GPS', setGpsAlerts],
+    ];
+    const results = await Promise.allSettled(requests.map(([path]) => apiFetch(path, { signal })));
+    if (signal?.aborted || version !== latestAlerts.current) return;
+    const errors = [];
+    results.forEach((result, index) => {
+      const [path, label, setValue] = requests[index];
+      if (result.status === 'fulfilled') setValue(result.value);
+      else errors.push({ path, label, message: result.reason?.message || 'Error al cargar los reportes.' });
+    });
+    const paths = new Set(requests.map(([path]) => path));
+    setLoadErrors((previous) => [...previous.filter(({ path }) => !paths.has(path)), ...errors]);
+    setAlertsPending(false);
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
-    const refresh = () => loadAllFromBackend(controller.signal);
+    const updateAlerts = () => refreshAlerts(controller.signal);
+    const refresh = () => {
+      loadAllFromBackend(controller.signal);
+      updateAlerts();
+    };
     refresh();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') updateAlerts();
+    }, 20000);
     window.addEventListener('focus', refresh);
-    window.addEventListener('huellas_alerta_gps_recibida', refresh);
+    window.addEventListener('huellas_alerta_gps_recibida', updateAlerts);
     return () => {
       controller.abort();
+      window.clearInterval(timer);
       window.removeEventListener('focus', refresh);
-      window.removeEventListener('huellas_alerta_gps_recibida', refresh);
+      window.removeEventListener('huellas_alerta_gps_recibida', updateAlerts);
     };
-  }, [loadAllFromBackend]);
+  }, [loadAllFromBackend, refreshAlerts]);
 
   // Formulario de nueva mascota en recepción
   const [formPet, setFormPet] = useState({
     nombre: '',
     especie: 'Canino',
-    raza: 'Beagle',
+    raza: '',
     id_propietario: '',
     sexo: 'Macho',
     edad: '',
@@ -147,8 +197,10 @@ export default function Dashboard({ user: currentUser }) {
     id_mascota: '', reason: '', diagnostico: '', tratamiento_receta: '', peso: '', temperatura: '',
   });
   const [formVacuna, setFormVacuna] = useState({
-    id_mascota: '', vaccine: 'Antirrábica Rabisin', lote: '', dias_refuerzo: '365',
+    id_mascota: '', id_lote: '', fecha_aplicacion: today, fecha_proximo_refuerzo: '', observaciones: '',
   });
+  const [formOwner, setFormOwner] = useState(EMPTY_OWNER);
+  const [formBatch, setFormBatch] = useState(EMPTY_BATCH);
   const [formStaff, setFormStaff] = useState({
     nombres: '', correo: '', rol: 'Veterinario', password: '', especialidad: '', turno: 'Mañana (8:00 - 14:00)',
   });
@@ -174,7 +226,7 @@ export default function Dashboard({ user: currentUser }) {
   const handleResolveGpsAlert = async (id) => {
     try {
       await apiFetch(`/mascotas/alertas-gps/${id}/resolver`, { method: 'PATCH' });
-      setGpsAlerts((current) => current.filter((alert) => alert.id !== id));
+      await refreshAlerts();
       showToast('Alerta de rescate archivada.');
     } catch (error) {
       showToast(error.message);
@@ -235,13 +287,26 @@ export default function Dashboard({ user: currentUser }) {
 
   const handleCreateVacuna = (event) => saveForm(event, '/clinica/vacunas', formVacuna, (saved) => {
     setModalVacunaOpen(false);
-    setFormVacuna({ id_mascota: '', vaccine: formVacuna.vaccine, lote: '', dias_refuerzo: '365' });
+    setFormVacuna({ id_mascota: '', id_lote: '', fecha_aplicacion: today, fecha_proximo_refuerzo: '', observaciones: '' });
     showToast(saved.recordatorio_programado ? 'Vacuna registrada y recordatorio programado.' : 'Vacuna registrada.');
+  });
+
+  const handleCreateBatch = (event) => saveForm(event, '/clinica/lotes-vacunas', formBatch, () => {
+    setModalBatchOpen(false);
+    setFormBatch(EMPTY_BATCH);
+    showToast('Lote registrado en el inventario.');
+  });
+
+  const handleCreateOwner = (event) => saveForm(event, '/auth/propietarios', formOwner, (saved) => {
+    setModalOwnerOpen(false);
+    setFormOwner(EMPTY_OWNER);
+    setFormPet((current) => ({ ...current, id_propietario: String(saved.id_propietario) }));
+    showToast(`Perfil de ${saved.nombres} registrado.`);
   });
 
   const handleCreatePetReception = (event) => saveForm(event, '/mascotas', formPet, (saved) => {
     setModalPetOpen(false);
-    setFormPet({ nombre: '', especie: 'Canino', raza: 'Beagle', id_propietario: '', sexo: 'Macho', edad: '', peso: '', alergias: '' });
+    setFormPet({ nombre: '', especie: 'Canino', raza: '', id_propietario: '', sexo: 'Macho', edad: '', peso: '', alergias: '' });
     showToast(`Paciente registrado con placa ${saved.codigo_qr}.`);
   });
 
@@ -257,7 +322,7 @@ export default function Dashboard({ user: currentUser }) {
         method: 'PATCH',
         body: JSON.stringify({ status }),
       });
-      setConsultas((current) => current.map((consulta) => consulta.id === id ? { ...consulta, status } : consulta));
+      await loadAllFromBackend();
       showToast(`Estado actualizado: ${STATUS_TEXT[status]}.`);
     } catch (error) {
       showToast(error.message);
@@ -267,7 +332,7 @@ export default function Dashboard({ user: currentUser }) {
   const handleResendReminder = async (reminder) => {
     try {
       const result = await sendDirectMessageDB({ id_recordatorio: reminder.id_recordatorio });
-      showToast(result.external ? 'El proveedor aceptó el envío.' : 'El envío quedó registrado en el sistema.');
+      showToast(result.external ? 'El proveedor aceptó el envío.' : 'El proveedor no confirmó el envío.');
       await loadAllFromBackend();
     } catch (error) {
       showToast(error.message);
@@ -281,40 +346,59 @@ export default function Dashboard({ user: currentUser }) {
   };
 
   const go = (id) => {
+    if (id !== currentNav.id) {
+      setSearchTerm('');
+      setStatusFilter('all');
+    }
     setActiveTab(id);
     setMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const resourceStatus = (path) => {
+    const report = path === '/mascotas/reportes/extravios' || path === '/mascotas/alertas-gps';
+    if (report ? alertsPending : pending) return 'loading';
+    return loadErrors.some((error) => error.path === path) ? 'error' : 'ready';
+  };
+
+  const search = searchTerm.trim().toLowerCase();
+  const visiblePets = mascotas.filter((pet) =>
+    (statusFilter === 'all' || pet.especie === statusFilter) &&
+    [pet.nombre, pet.codigoQR, pet.propietario, pet.raza].some((value) => value?.toLowerCase().includes(search))
+  );
+  const visibleOwners = propietarios.filter((owner) =>
+    [owner.nombres, owner.dni, owner.telefono].some((value) => String(value ?? '').toLowerCase().includes(search))
+  );
+  const visibleReminders = recordatorios.filter((reminder) =>
+    `${reminder.pet} ${reminder.owner}`.toLowerCase().includes(search)
+  );
+
+  const totals = resourceStatus('/clinica/dashboard') === 'ready' ? metrics?.totales : null;
   const kpis = [
-    ['paw', 'sky', 'Mascotas registradas', metrics?.totales.mascotas],
-    ['clipboard', 'violet', 'Consultas registradas', metrics?.totales.consultas],
-    ['shield', 'amber', 'Vacunas por vencer', metrics?.totales.vacunasPorVencer],
-    ['users', 'green', 'Propietarios registrados', metrics?.totales.propietarios],
+    ['paw', 'sky', 'Mascotas registradas', totals?.mascotas],
+    ['clipboard', 'violet', 'Consultas registradas', totals?.consultas],
+    ['shield', 'amber', 'Refuerzos en los próximos 15 días', totals?.vacunasPorVencer],
+    ['shield', 'amber', 'Refuerzos vencidos', totals?.vacunasVencidas],
   ];
-  const species = (metrics?.especies || []).map((entry, index) => ({
-    name: entry.especie,
-    value: (Number(entry.cantidad) / Number(metrics.totales.mascotas)) * 100,
-    color: SPECIES_COLORS[index % SPECIES_COLORS.length],
-  }));
   const agenda = consultas.filter((entry) => entry.fecha_hora && dateKey.format(new Date(entry.fecha_hora)) === today);
-  const binDays = chartRange === 'week' ? 1 : 7;
-  const bins = chartRange === 'week' ? 7 : 8;
-  const labels = [];
-  const data = [];
-  const todayUTC = new Date(`${today}T00:00:00Z`).getTime();
-  for (let index = bins - 1; index >= 0; index--) {
-    const lastDay = todayUTC - index * binDays * 86400000;
-    const firstDay = lastDay - (binDays - 1) * 86400000;
-    const first = new Date(firstDay).toISOString().slice(0, 10);
-    const last = new Date(lastDay).toISOString().slice(0, 10);
-    labels.push(first.slice(5).split('-').reverse().join('/'));
-    data.push(consultas.filter((entry) => {
-      if (entry.status !== 'done' || !entry.fecha_hora) return false;
-      const day = dateKey.format(new Date(entry.fecha_hora));
-      return day >= first && day <= last;
-    }).length);
-  }
+  const eligibleBatches = batches.filter((batch) => batch.dosis_disponibles > 0 &&
+    batch.fecha_vencimiento >= formVacuna.fecha_aplicacion);
+  const visibleVaccines = vacunas.filter((vaccine) =>
+    [vaccine.pet, vaccine.vaccine, vaccine.lote].some((value) => value?.toLowerCase().includes(search))
+  );
+  const visibleAccounts = accounts.filter((account) =>
+    [account.nombres, account.correo, account.rol].some((value) => value?.toLowerCase().includes(search)) &&
+    (statusFilter === 'all' || account.rol === statusFilter)
+  );
+  const openVaccineModal = () => {
+    setFormError('');
+    setFormVacuna((current) => ({ ...current, fecha_aplicacion: today, id_lote: '' }));
+    setModalVacunaOpen(true);
+  };
+  const openBatchModal = () => {
+    setFormError('');
+    setModalBatchOpen(true);
+  };
   const patientOptions = mascotas.map((pet) => (
     <option key={pet.id_mascota} value={pet.id_mascota}>
       {pet.nombre} · {pet.codigoQR} · {pet.propietario}
@@ -404,7 +488,7 @@ export default function Dashboard({ user: currentUser }) {
 
           <div style={{ position: 'relative' }}>
             <button
-              className={`icon-btn ${gpsAlerts.length > 0 || mascotas.some((m) => m.estadoExtravio) ? 'has-dot' : ''}`}
+              className={`icon-btn ${gpsAlerts.length > 0 || lostPets.length > 0 ? 'has-dot' : ''}`}
               aria-label="Notificaciones"
               title="Alertas de la clínica"
               onClick={() => setModalAlertasOpen(!modalAlertasOpen)}
@@ -451,9 +535,9 @@ export default function Dashboard({ user: currentUser }) {
 
                 <div style={{ maxHeight: '340px', overflowY: 'auto', padding: '0.8rem' }}>
                   {/* Alertas de Mascota Perdida / GPS */}
-                  {mascotas.filter((m) => m.estadoExtravio).map((lostPet) => (
+                  {lostPets.map((lostPet) => (
                     <div
-                      key={lostPet.id || lostPet.codigoQR}
+                      key={lostPet.id_mascota}
                       style={{
                         background: 'rgba(239, 68, 68, 0.15)',
                         border: '1px solid rgba(239, 68, 68, 0.35)',
@@ -467,10 +551,10 @@ export default function Dashboard({ user: currentUser }) {
                         <span>Mascota Extraviada: {lostPet.nombre}</span>
                       </div>
                       <p style={{ margin: '0.3rem 0 0.5rem', fontSize: '0.76rem', color: '#CBD5E1' }}>
-                        Placa {lostPet.codigoQR || lostPet.id} · Dueño: {lostPet.propietario}
+                        Placa {lostPet.codigoQR} · Dueño: {lostPet.propietario}
                       </p>
                       <Link
-                        to={`/pet/${lostPet.codigoQR || lostPet.id}`}
+                        to={`/pet/${lostPet.codigoQR}`}
                         onClick={() => setModalAlertasOpen(false)}
                         style={{
                           display: 'inline-block',
@@ -524,68 +608,16 @@ export default function Dashboard({ user: currentUser }) {
                     </div>
                   )}
 
-                  {/* Vacunas Próximas */}
-                  <div
-                    style={{
-                      background: 'rgba(56, 189, 248, 0.1)',
-                      border: '1px solid rgba(56, 189, 248, 0.25)',
-                      borderRadius: '10px',
-                      padding: '0.75rem'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#38BDF8', fontWeight: 700, fontSize: '0.82rem' }}>
-                      <Icon name="shield" size={15} />
-                      <span>Campañas & Vacunación</span>
-                    </div>
-                    <p style={{ margin: '0.3rem 0 0.5rem', fontSize: '0.76rem', color: '#CBD5E1' }}>
-                      Revisa los carnets de pacientes con refuerzos programados para este mes.
-                    </p>
-                    <button
-                      onClick={() => {
-                        setModalAlertasOpen(false);
-                        go('vacunas');
-                      }}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        color: '#38BDF8',
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                        padding: 0,
-                        textDecoration: 'underline'
-                      }}
-                    >
-                      Ver Carnets de Vacunación →
-                    </button>
-                  </div>
-                </div>
-
-                <div style={{
-                  padding: '0.75rem 1rem',
-                  borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-                  background: 'rgba(0, 0, 0, 0.2)',
-                  display: 'flex',
-                  justifyContent: 'flex-end'
-                }}>
-                  <button
-                    onClick={() => {
+                  {clinical && vacunas.some((vaccine) => vaccine.status === 'por-vencer') && (
+                    <button type="button" className="btn btn-outline sm" onClick={() => {
                       setModalAlertasOpen(false);
-                      showToast('Todas las alertas marcadas como revisadas');
-                    }}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: '1px solid rgba(255, 255, 255, 0.15)',
-                      color: '#E2E8F0',
-                      borderRadius: '8px',
-                      padding: '0.35rem 0.8rem',
-                      fontSize: '0.76rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Marcar como Leídas
-                  </button>
+                      go('vacunas');
+                    }}>Ver próximos refuerzos</button>
+                  )}
+                  {!lostPets.length && !consultas.some((entry) => entry.status === 'waiting') &&
+                    !(clinical && vacunas.some((vaccine) => vaccine.status === 'por-vencer')) && (
+                    <p>No hay avisos operativos en esta lista.</p>
+                  )}
                 </div>
               </div>
             )}
@@ -602,7 +634,16 @@ export default function Dashboard({ user: currentUser }) {
 
         <div className="page">
           {pending && <p role="status">Cargando datos de la clínica…</p>}
-          {loadError && <p role="alert">{loadError} <button type="button" onClick={() => loadAllFromBackend()}>Reintentar</button></p>}
+          {(loadErrors.length > 0 || metrics?.avisos?.length > 0) && (
+            <div className="staff-load-error" role="alert">
+              <strong>Algunos datos no se pudieron cargar.</strong>
+              <ul>
+                {loadErrors.map(({ path, label, message }) => <li key={path}>{label}: {message}</li>)}
+                {metrics?.avisos?.map(({ label, message }) => <li key={label}>{label}: {message}</li>)}
+              </ul>
+              <button className="btn btn-outline sm" type="button" onClick={() => { loadAllFromBackend(); refreshAlerts(); }}>Reintentar</button>
+            </div>
+          )}
           {/* BANNER DINÁMICO DE ACCIÓN CLÍNICA SEGÚN ROL */}
           <section className="staff-action-banner">
             <div className="staff-action-info">
@@ -610,9 +651,11 @@ export default function Dashboard({ user: currentUser }) {
                 <Icon name={isVet ? 'doctor' : isRecep ? 'desk' : 'shield'} size={26} />
               </div>
               <div className="staff-action-text">
-                <h2>{SECTIONS[currentNav.id]?.title}</h2>
+                <h2>{isRecep && currentNav.id === 'inicio' ? 'Panel de Recepción' : SECTIONS[currentNav.id]?.title}</h2>
                 <p>
-                  Bienvenido, <strong>{currentUser.nombres}</strong> ({currentUser.rol}). {SECTIONS[currentNav.id]?.desc}
+                  Bienvenido, <strong>{currentUser.nombres}</strong> ({currentUser.rol}). {isRecep && currentNav.id === 'inicio'
+                    ? 'Consulta pacientes, propietarios y recordatorios.'
+                    : SECTIONS[currentNav.id]?.desc}
                 </p>
               </div>
             </div>
@@ -624,7 +667,7 @@ export default function Dashboard({ user: currentUser }) {
                     <Icon name="plus" size={16} />
                     <span>Nueva Consulta</span>
                   </button>
-                  <button className="btn-staff-secondary" onClick={() => { setFormError(''); setModalVacunaOpen(true); }}>
+                  <button className="btn-staff-secondary" onClick={openVaccineModal}>
                     <Icon name="syringe" size={16} />
                     <span>Aplicar Vacuna</span>
                   </button>
@@ -637,7 +680,10 @@ export default function Dashboard({ user: currentUser }) {
                     <Icon name="paw" size={16} />
                     <span>Registrar Paciente QR</span>
                   </button>
-
+                  <button type="button" className="btn-staff-secondary" onClick={() => go('propietarios')}>
+                    <Icon name="users" size={16} />
+                    <span>Ver propietarios</span>
+                  </button>
                 </>
               )}
 
@@ -649,7 +695,7 @@ export default function Dashboard({ user: currentUser }) {
                   </button>
                   <button className="btn-staff-secondary" onClick={() => go('usuarios')}>
                     <Icon name="shield" size={16} />
-                    <span>Auditoría de Roles</span>
+                    <span>Ver cuentas de usuario</span>
                   </button>
                 </>
               )}
@@ -739,8 +785,18 @@ export default function Dashboard({ user: currentUser }) {
           {/* VISTA 1: INICIO (RESUMEN GENERAL) */}
           {currentNav.id === 'inicio' && (
             <>
-              {/* KPIS DE RENDIMIENTO CLÍNICO */}
-              <section className="kpis">
+              {isRecep && (
+                <ReceptionOverview
+                  mascotas={mascotas}
+                  propietarios={propietarios}
+                  recordatorios={recordatorios}
+                  gpsAlerts={gpsAlerts}
+                  status={resourceStatus}
+                  onOpenSection={go}
+                />
+              )}
+
+              {clinical && <section className="kpis">
                 {kpis.map(([icon, tone, label, value]) => (
                   <article className={`kpi tone-${tone}`} key={label}>
                     <span className="tile"><Icon name={icon} size={22} /></span>
@@ -748,23 +804,19 @@ export default function Dashboard({ user: currentUser }) {
                     <div className="kpi-foot"><span>{label}</span></div>
                   </article>
                 ))}
-              </section>
+              </section>}
 
-              {/* ALERTA DE MASCOTA EXTRAVIADA DETECTADA (SOLO SI HAY MASCOTAS EN MODO PERDIDO) */}
-              {mascotas.some((m) => m.estadoExtravio) && (
-                <>
-                  {mascotas.filter((m) => m.estadoExtravio).map((lostPet) => (
-                    <section className="strip" role="status" key={lostPet.id || lostPet.codigoQR}>
-                      <span className="strip-ico"><Icon name="alert" size={20} /></span>
-                      <p>
-                        <strong>Modo Mascota Extraviada Activo.</strong> {lostPet.nombre} ({lostPet.raza || lostPet.especie} #{lostPet.codigoQR || lostPet.id}) fue reportado como extraviado. Propietario: {lostPet.propietario}.
-                      </p>
-                      <Link to={`/pet/${lostPet.codigoQR || lostPet.id}`} className="btn btn-outline sm">
-                        Ver Ficha QR
-                      </Link>
-                    </section>
-                  ))}
-                </>
+              <LostPetReports pets={lostPets} status={resourceStatus('/mascotas/reportes/extravios')} />
+              {isAdmin && (
+                <article className="card">
+                  <header className="card-head">
+                    <div>
+                      <h2>Cuentas de usuario</h2>
+                      {resourceStatus('/auth/usuarios') === 'ready' && <p>{accounts.length} cuentas registradas</p>}
+                    </div>
+                    <button type="button" className="btn btn-outline sm" onClick={() => go('usuarios')}>Ver todas las cuentas</button>
+                  </header>
+                </article>
               )}
 
               {clinical && (
@@ -784,45 +836,7 @@ export default function Dashboard({ user: currentUser }) {
                 </article>
               )}
 
-              {/* GRÁFICOS */}
-              <section className="grid-2-1">
-                {clinical && <article className="card">
-                  <header className="card-head">
-                    <div>
-                      <h2>Consultas Médicas Atendidas</h2>
-                      <p>{chartRange === 'week' ? 'Semana en curso' : 'Últimas 8 semanas'}</p>
-                    </div>
-                    <div className="seg" role="group" aria-label="Rango del gráfico">
-                      <button className={chartRange === 'week' ? 'on' : ''} onClick={() => setChartRange('week')}>
-                        7 días
-                      </button>
-                      <button className={chartRange === 'month' ? 'on' : ''} onClick={() => setChartRange('month')}>
-                        8 semanas
-                      </button>
-                    </div>
-                  </header>
-                  <BarChart key={chartRange} labels={labels} data={data} />
-                </article>}
-
-                <article className="card">
-                  <header className="card-head">
-                    <div>
-                      <h2>Distribución por Especie</h2>
-                      <p>{metrics?.totales.mascotas ?? '—'} mascotas registradas</p>
-                    </div>
-                  </header>
-                  <Donut parts={species} total={metrics?.totales.mascotas ?? '—'} label="pacientes" />
-                  <ul className="legend">
-                    {species.map((s) => (
-                      <li key={s.name}>
-                        <i style={{ background: s.color }} />
-                        {s.name}
-                        <strong>{Math.round(s.value)}%</strong>
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              </section>
+              <DashboardCharts metrics={metrics} clinical={clinical} status={resourceStatus('/clinica/dashboard')} />
 
               {/* ACTIVIDAD & VACUNAS POR VENCER */}
               {clinical && <section className="grid-2-1">
@@ -830,13 +844,16 @@ export default function Dashboard({ user: currentUser }) {
                   <header className="card-head">
                     <div>
                       <h2>Próximas Vacunas por Vencer</h2>
-                      <p>Dosis con recordatorio pendiente</p>
+                      <p>Próximos 15 días</p>
                     </div>
                     <button className="btn btn-outline sm" onClick={() => go('vacunas')}>
                       Ver Todas <Icon name="arrow" size={16} />
                     </button>
                   </header>
                   <ul className="list">
+                    {resourceStatus('/clinica/vacunas') === 'ready' && !vacunas.some((v) => v.status === 'por-vencer') && (
+                      <li className="staff-empty-state">No hay refuerzos en los próximos 15 días.</li>
+                    )}
                     {vacunas.filter((vacuna) => vacuna.status === 'por-vencer').slice(0, 5).map((v) => (
                       <li className="row" key={v.id || v.pet}>
                         <span className="avatar" style={{ background: 'rgba(16, 185, 129, 0.15)', color: '#34D399' }}>
@@ -856,10 +873,13 @@ export default function Dashboard({ user: currentUser }) {
                   <header className="card-head">
                     <div>
                       <h2>Actividad Reciente</h2>
-                      <p>Eventos clínicos del día</p>
+                      <p>Últimas consultas registradas</p>
                     </div>
                   </header>
                   <ul className="list">
+                    {resourceStatus('/clinica/consultas') === 'ready' && consultas.length === 0 && (
+                      <li className="staff-empty-state">Registra la primera consulta para ver actividad aquí.</li>
+                    )}
                     {consultas.slice(0, 5).map((a) => (
                       <li className="row activity" key={a.id}>
                         <span className="tile sm" style={{ background: 'rgba(245, 158, 11, 0.15)', color: '#FBBF24' }}>
@@ -899,6 +919,9 @@ export default function Dashboard({ user: currentUser }) {
                       </tr>
                     </thead>
                     <tbody>
+                      {resourceStatus('/clinica/consultas') === 'ready' && agenda.length === 0 && (
+                        <tr><td colSpan={6} className="staff-empty-state">Hoy aún no hay consultas registradas.</td></tr>
+                      )}
                       {agenda.map((c) => (
                         <tr key={c.id || c.pet}>
                           <td>
@@ -1120,16 +1143,12 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {mascotas
-                      .filter((m) => {
-                        const matchSearch =
-                          m.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          m.codigoQR.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (m.propietario || '').toLowerCase().includes(searchTerm.toLowerCase());
-                        const matchFilter = statusFilter === 'all' || m.especie === statusFilter;
-                        return matchSearch && matchFilter;
-                      })
-                      .map((m) => (
+                    {visiblePets.length === 0 && resourceStatus('/mascotas') === 'ready' && (
+                      <tr><td colSpan={7} className="staff-empty-state">
+                        {mascotas.length ? 'No encontramos mascotas con estos filtros.' : 'Todavía no hay mascotas registradas.'}
+                      </td></tr>
+                    )}
+                    {visiblePets.map((m) => (
                         <tr key={m.id}>
                           <td><code>{m.id}</code></td>
                           <td>
@@ -1269,8 +1288,12 @@ export default function Dashboard({ user: currentUser }) {
 
           {/* VISTA 4: CARNETS & VACUNACIÓN */}
           {currentNav.id === 'vacunas' && (
+            <>
+            <VaccineInventory batches={batches} today={today} onCreate={openBatchModal}
+              status={resourceStatus('/clinica/lotes-vacunas')} />
             <div className="mgmt-card">
               <div style={{ padding: '1.5rem 1.8rem 0' }}>
+                <h2>Carnet de vacunación</h2>
                 <div className="mgmt-toolbar">
                   <div className="mgmt-search-wrapper">
                     <span className="mgmt-search-icon"><Icon name="search" size={16} /></span>
@@ -1282,7 +1305,7 @@ export default function Dashboard({ user: currentUser }) {
                     />
                   </div>
 
-                  <button className="btn-staff-primary" onClick={() => { setFormError(''); setModalVacunaOpen(true); }}>
+                  <button className="btn-staff-primary" onClick={openVaccineModal}>
                     <Icon name="syringe" size={16} />
                     <span>Aplicar Dosis</span>
                   </button>
@@ -1304,24 +1327,23 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {vacunas
-                      .filter((v) =>
-                        v.pet.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        v.vaccine.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        v.lote.toLowerCase().includes(searchTerm.toLowerCase())
-                      )
-                      .map((v) => (
+                    {visibleVaccines.length === 0 && resourceStatus('/clinica/vacunas') === 'ready' && (
+                      <tr><td colSpan={8} className="staff-empty-state">
+                        {vacunas.length ? 'No hay resultados para esa búsqueda.' : 'El carnet se llena al aplicar la primera dosis.'}
+                      </td></tr>
+                    )}
+                    {visibleVaccines                      .map((v) => (
                         <tr key={v.id || v.pet}>
                           <td><code>{v.lote}</code></td>
                           <td><strong style={{ color: '#FFFFFF' }}>{v.pet}</strong></td>
                           <td>{v.owner}</td>
                           <td><strong>{v.vaccine}</strong></td>
-                          <td>{v.applied}</td>
-                          <td><strong>{v.expire}</strong></td>
+                          <td>{v.applied || 'Sin fecha'}</td>
+                          <td><strong>{v.expire || 'Sin fecha'}</strong></td>
                           <td>{v.vet}</td>
                           <td>
-                            <span className={`mgmt-badge ${v.status === 'por-vencer' ? 'warn' : 'ok'}`}>
-                              <Icon name="shield" size={12} /> {v.status === 'por-vencer' ? 'Por Vencer' : 'Vigente'}
+                            <span className={`mgmt-badge ${v.status === 'al-dia' ? 'ok' : 'warn'}`}>
+                              <Icon name="shield" size={12} /> {VACCINE_STATUS[v.status] || 'Sin refuerzo registrado'}
                             </span>
                           </td>
                         </tr>
@@ -1330,6 +1352,7 @@ export default function Dashboard({ user: currentUser }) {
                 </table>
               </div>
             </div>
+            </>
           )}
 
           {/* VISTA 5: DIRECTORIO DE PROPIETARIOS */}
@@ -1346,6 +1369,9 @@ export default function Dashboard({ user: currentUser }) {
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
+                  <button type="button" className="btn-staff-primary" onClick={() => { setFormError(''); setModalOwnerOpen(true); }}>
+                    <Icon name="plus" size={16} /> Registrar propietario
+                  </button>
                 </div>
               </div>
 
@@ -1362,18 +1388,17 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {propietarios
-                      .filter((p) =>
-                        p.nombres.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        (p.dni || '').includes(searchTerm) ||
-                        (p.telefono || '').includes(searchTerm)
-                      )
-                      .map((p) => (
+                    {visibleOwners.length === 0 && resourceStatus('/auth/propietarios') === 'ready' && (
+                      <tr><td colSpan={6} className="staff-empty-state">
+                        {propietarios.length ? 'No encontramos propietarios con esa búsqueda.' : 'Aquí aparecerán los propietarios registrados en Huellas PetID.'}
+                      </td></tr>
+                    )}
+                    {visibleOwners.map((p) => (
                         <tr key={p.id_propietario}>
                           <td><strong style={{ color: '#FFFFFF' }}>{p.nombres}</strong></td>
                           <td><code>{p.dni}</code></td>
                           <td>
-                            <a
+                            {formatWhatsAppPhone(p.telefono) ? <a
                               href={`https://wa.me/${formatWhatsAppPhone(p.telefono)}`}
                               target="_blank"
                               rel="noreferrer"
@@ -1381,7 +1406,7 @@ export default function Dashboard({ user: currentUser }) {
                             >
                               <Icon name="phone" size={14} />
                               <span>{p.telefono}</span>
-                            </a>
+                            </a> : p.telefono || 'Sin teléfono registrado'}
                           </td>
                           <td>{p.correo}</td>
                           <td>{p.direccion}</td>
@@ -1432,7 +1457,12 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {recordatorios.filter((r) => `${r.pet} ${r.owner}`.toLowerCase().includes(searchTerm.toLowerCase())).map((r) => (
+                    {visibleReminders.length === 0 && resourceStatus('/mensajeria/recordatorios') === 'ready' && (
+                      <tr><td colSpan={8} className="staff-empty-state">
+                        {recordatorios.length ? 'No encontramos recordatorios con esa búsqueda.' : 'Todavía no hay recordatorios registrados.'}
+                      </td></tr>
+                    )}
+                    {visibleReminders.map((r) => (
                       <tr key={r.id}>
                         <td><code>{r.id}</code></td>
                         <td><strong style={{ color: '#FFFFFF' }}>{r.pet}</strong></td>
@@ -1475,15 +1505,22 @@ export default function Dashboard({ user: currentUser }) {
                     <span className="mgmt-search-icon"><Icon name="search" size={16} /></span>
                     <input
                       className="mgmt-search-input"
-                      placeholder="Buscar miembros del equipo..."
+                      placeholder="Buscar por nombre, correo o rol..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                     />
                   </div>
 
+                  <select className="staff-input-field" aria-label="Filtrar cuentas por rol"
+                    value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                    <option value="all">Todos los roles</option>
+                    {['Administrador', 'Veterinario', 'Recepcionista', 'Propietario'].map((role) =>
+                      <option key={role} value={role}>{role}</option>
+                    )}
+                  </select>
                   <button className="btn-staff-primary" onClick={() => { setFormError(''); setModalStaffOpen(true); }}>
                     <Icon name="plus" size={16} />
-                    <span>Crear Nuevo Usuario Staff</span>
+                    <span>Crear cuenta de personal</span>
                   </button>
                 </div>
               </div>
@@ -1492,8 +1529,8 @@ export default function Dashboard({ user: currentUser }) {
                 <table className="mgmt-table">
                   <thead>
                     <tr>
-                      <th>Profesional</th>
-                      <th>Correo Institucional</th>
+                      <th>Nombre</th>
+                      <th>Correo</th>
                       <th>Rol en el Sistema</th>
                       <th>Especialidad / Área</th>
                       <th>Turno</th>
@@ -1501,12 +1538,10 @@ export default function Dashboard({ user: currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {personal
-                      .filter((u) =>
-                        u.nombres.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                        u.correo.toLowerCase().includes(searchTerm.toLowerCase())
-                      )
-                      .map((u) => (
+                    {visibleAccounts.length === 0 && resourceStatus('/auth/usuarios') === 'ready' && (
+                      <tr><td colSpan={6} className="staff-empty-state">No hay cuentas que coincidan con los filtros.</td></tr>
+                    )}
+                    {visibleAccounts                      .map((u) => (
                         <tr key={u.id}>
                           <td>
                             <div className="mgmt-patient-cell">
@@ -1527,7 +1562,7 @@ export default function Dashboard({ user: currentUser }) {
                           <td>{u.especialidad}</td>
                           <td>{u.turno}</td>
                           <td>
-                            <span className="mgmt-badge ok">
+                            <span className={`mgmt-badge ${u.estado === 'activo' ? 'ok' : 'other'}`}>
                               <Icon name="check" size={12} /> {u.estado}
                             </span>
                           </td>
@@ -1651,43 +1686,87 @@ export default function Dashboard({ user: currentUser }) {
                 </label>
 
                 <div className="staff-modal-form-grid">
-                  <div>
-                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Biológico / Vacuna *
-                    </label>
-                    <select
-                      className="staff-input-field"
-                      value={formVacuna.vaccine}
-                      onChange={(e) => setFormVacuna({ ...formVacuna, vaccine: e.target.value })}
-                    >
-                      <option value="Antirrábica Rabisin">Antirrábica Rabisin</option>
-                      <option value="Sextuple Vanguard Plus">Sextuple Vanguard Plus</option>
-                      <option value="Triple Felina Felocell">Triple Felina Felocell</option>
-                      <option value="KC Bronchicine">KC Bronchicine (Tos de las perreras)</option>
-                      <option value="Parvovirus Nobivac">Parvovirus Nobivac</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Número de Lote *
-                    </label>
-                    <input
-                      className="staff-input-field"
-                      required
-                      value={formVacuna.lote}
-                      onChange={(e) => setFormVacuna({ ...formVacuna, lote: e.target.value })}
-                    />
-                  </div>
+                  <label>Fecha de aplicación
+                    <input className="staff-input-field" required type="date" max={today}
+                      value={formVacuna.fecha_aplicacion}
+                      onChange={(event) => setFormVacuna({ ...formVacuna, fecha_aplicacion: event.target.value, id_lote: '' })} />
+                  </label>
+                  <label>Fecha de próximo refuerzo
+                    <input className="staff-input-field" required type="date" value={formVacuna.fecha_proximo_refuerzo}
+                      onChange={(event) => setFormVacuna({ ...formVacuna, fecha_proximo_refuerzo: event.target.value })} />
+                  </label>
                 </div>
+                <label>Vacuna y lote
+                  <select className="staff-input-field" required value={formVacuna.id_lote}
+                    onChange={(event) => setFormVacuna({ ...formVacuna, id_lote: event.target.value })}>
+                    <option value="">Selecciona un lote</option>
+                    {eligibleBatches.map((batch) => (
+                      <option key={batch.id_lote} value={batch.id_lote}>
+                        {batch.vacuna} · {batch.lote_fabricante} · {batch.dosis_disponibles} disponibles
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {resourceStatus('/clinica/lotes-vacunas') === 'ready' && eligibleBatches.length === 0 && (
+                  <p>No hay lotes disponibles para esa fecha.{' '}
+                    <button type="button" className="btn btn-outline sm" onClick={() => {
+                      setModalVacunaOpen(false);
+                      openBatchModal();
+                    }}>Registrar un lote</button>
+                  </p>
+                )}
+                <label>Observaciones
+                  <textarea className="staff-input-field" rows="2" maxLength={255} value={formVacuna.observaciones}
+                    onChange={(event) => setFormVacuna({ ...formVacuna, observaciones: event.target.value })} />
+                </label>
               </div>
 
               <div className="staff-modal-footer">
                 <button type="button" className="btn-staff-secondary" onClick={() => setModalVacunaOpen(false)}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-staff-primary" disabled={saving}>
+                <button type="submit" className="btn-staff-primary" disabled={saving || !eligibleBatches.length || !mascotas.length}>
                   <Icon name="check" size={16} /> Registrar en Carnet Digital
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {modalBatchOpen && (
+        <div className="staff-modal-overlay" onClick={() => setModalBatchOpen(false)}>
+          <div className="staff-modal-box" role="dialog" aria-modal="true" aria-labelledby="batch-title"
+            onClick={(event) => event.stopPropagation()}>
+            <div className="staff-modal-header">
+              <h3 id="batch-title">Registrar lote de vacunas</h3>
+              <button type="button" aria-label="Cerrar" onClick={() => setModalBatchOpen(false)}><Icon name="close" size={20} /></button>
+            </div>
+            <form onSubmit={handleCreateBatch}>
+              {formError && <p role="alert">{formError}</p>}
+              <div className="staff-modal-body">
+                <label>Nombre de la vacuna
+                  <input className="staff-input-field" required maxLength={120} value={formBatch.vacuna}
+                    onChange={(event) => setFormBatch({ ...formBatch, vacuna: event.target.value })} />
+                </label>
+                <label>Número de lote del fabricante
+                  <input className="staff-input-field" required maxLength={60} value={formBatch.lote_fabricante}
+                    onChange={(event) => setFormBatch({ ...formBatch, lote_fabricante: event.target.value })} />
+                </label>
+                <div className="staff-modal-form-grid">
+                  <label>Fecha de vencimiento
+                    <input className="staff-input-field" required type="date" min={today} value={formBatch.fecha_vencimiento}
+                      onChange={(event) => setFormBatch({ ...formBatch, fecha_vencimiento: event.target.value })} />
+                  </label>
+                  <label>Dosis recibidas
+                    <input className="staff-input-field" required type="number" min="1" max="1000000" value={formBatch.dosis_iniciales}
+                      onChange={(event) => setFormBatch({ ...formBatch, dosis_iniciales: event.target.value })} />
+                  </label>
+                </div>
+              </div>
+              <div className="staff-modal-footer">
+                <button type="button" className="btn-staff-secondary" onClick={() => setModalBatchOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn-staff-primary" disabled={saving}>Guardar lote</button>
               </div>
             </form>
           </div>
@@ -1793,6 +1872,41 @@ export default function Dashboard({ user: currentUser }) {
         </div>
       )}
 
+      {modalOwnerOpen && (
+        <div className="staff-modal-overlay" onClick={() => setModalOwnerOpen(false)}>
+          <section className="staff-modal-box" role="dialog" aria-modal="true" aria-labelledby="owner-title"
+            onClick={(event) => event.stopPropagation()}>
+            <header className="staff-modal-header">
+              <h3 id="owner-title">Registrar propietario</h3>
+              <button type="button" aria-label="Cerrar" onClick={() => setModalOwnerOpen(false)}><Icon name="close" size={20} /></button>
+            </header>
+            <form onSubmit={handleCreateOwner}>
+              {formError && <p role="alert">{formError}</p>}
+              <div className="staff-modal-body">
+                <p>El perfil permite registrar mascotas. El propietario podrá acceder cuando verifique su correo en el registro público.</p>
+                {[
+                  ['nombres', 'Nombre completo', 'text', 120],
+                  ['dni', 'DNI', 'text', 8],
+                  ['correo', 'Correo electrónico', 'email', 120],
+                  ['telefono', 'Celular', 'tel', 30],
+                  ['direccion', 'Dirección', 'text', 255],
+                ].map(([key, label, type, maxLength]) => (
+                  <label key={key}>{label}
+                    <input className="staff-input-field" type={type} maxLength={maxLength}
+                      inputMode={key === 'dni' ? 'numeric' : undefined} required value={formOwner[key]}
+                      onChange={(event) => setFormOwner({ ...formOwner, [key]: event.target.value })} />
+                  </label>
+                ))}
+              </div>
+              <div className="staff-modal-footer">
+                <button type="button" className="btn-staff-secondary" onClick={() => setModalOwnerOpen(false)}>Cancelar</button>
+                <button type="submit" className="btn-staff-primary" disabled={saving}>Guardar propietario</button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+
       {/* MODAL 4: REGISTRAR PACIENTE QR (RECEPCIÓN & ADMIN) */}
       {modalPetOpen && (
         <div className="staff-modal-overlay" onClick={() => setModalPetOpen(false)}>
@@ -1831,10 +1945,19 @@ export default function Dashboard({ user: currentUser }) {
                     <select className="staff-input-field" required value={formPet.id_propietario}
                       onChange={(event) => setFormPet({ ...formPet, id_propietario: event.target.value })}>
                       <option value="">Selecciona un propietario registrado</option>
-                      {propietarios.filter((owner) => owner.cuenta_estado === 'activo').map((owner) => (
+                      {propietarios.map((owner) => (
                         <option key={owner.id_propietario} value={owner.id_propietario}>{owner.nombres} · {owner.correo}</option>
                       ))}
                     </select>
+                    {resourceStatus('/auth/propietarios') === 'ready' && propietarios.length === 0 && (
+                      <p className="staff-empty-state">Registra al propietario primero.{' '}
+                        <button type="button" className="btn btn-outline sm" onClick={() => {
+                          setModalPetOpen(false);
+                          setFormError('');
+                          setModalOwnerOpen(true);
+                        }}>Registrar propietario</button>
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1848,8 +1971,7 @@ export default function Dashboard({ user: currentUser }) {
                       value={formPet.especie}
                       onChange={(e) => {
                         const esp = e.target.value;
-                        const rList = getRazasPorEspecie(esp);
-                        setFormPet({ ...formPet, especie: esp, raza: rList[0] || 'Mestizo' });
+                        setFormPet({ ...formPet, especie: esp, raza: '' });
                       }}
                     >
                       <option value="Canino">Canino (Perro)</option>
@@ -1861,13 +1983,14 @@ export default function Dashboard({ user: currentUser }) {
                   </div>
                   <div>
                     <label style={{ fontSize: '0.8rem', color: '#9CA3AF', marginBottom: '0.3rem', display: 'block' }}>
-                      Raza (Catálogo Normalizado) *
+                      Raza
                     </label>
                     <select
                       className="staff-input-field"
                       value={formPet.raza}
                       onChange={(e) => setFormPet({ ...formPet, raza: e.target.value })}
                     >
+                      <option value="">Sin raza registrada</option>
                       {getRazasPorEspecie(formPet.especie).map((r) => (
                         <option key={r} value={r} style={{ background: '#0F172A', color: '#FFFFFF' }}>{r}</option>
                       ))}
@@ -1935,7 +2058,7 @@ export default function Dashboard({ user: currentUser }) {
                 <button type="button" className="btn-staff-secondary" onClick={() => setModalPetOpen(false)}>
                   Cancelar
                 </button>
-                <button type="submit" className="btn-staff-primary" disabled={saving}>
+                <button type="submit" className="btn-staff-primary" disabled={saving || !propietarios.length}>
                   <Icon name="check" size={16} /> Registrar y Emitir Placa QR
                 </button>
               </div>

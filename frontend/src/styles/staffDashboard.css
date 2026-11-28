@@ -483,3 +483,39 @@ select option {
     justify-content: center;
   }
 }
+
+.staff-empty-state {
+  padding: 1rem 1.25rem;
+  margin: 0;
+  color: #a9b8ce;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.staff-load-error {
+  padding: 0.9rem 1rem;
+  color: #fecaca;
+  background: #3b202a;
+  border: 1px solid #683a45;
+  border-radius: 0.75rem;
+}
+
+.staff-load-error ul {
+  margin: 0.4rem 0 0.75rem;
+  padding-left: 1.2rem;
+}
+
+.dashboard-chart-header {
+  flex-wrap: wrap;
+}
+
+.dashboard-chart-header select,
+.mgmt-toolbar > select {
+  width: auto;
+  max-width: 100%;
+}
+
+.dashboard-chart-range {
+  width: max-content;
+  margin: 0 1.4rem 1rem;
+}

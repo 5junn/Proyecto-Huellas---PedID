@@ -69,7 +69,7 @@ const SCHEMA_STATEMENTS = [
     alergias TEXT DEFAULT NULL,
     observaciones_medicas TEXT DEFAULT NULL,
     modo_extraviado TINYINT(1) NOT NULL DEFAULT 0,
-    recompensa VARCHAR(80) DEFAULT 'S/ 500',
+    recompensa VARCHAR(80) DEFAULT NULL,
     estado ENUM('Activo', 'En Observación', 'Fallecido') NOT NULL DEFAULT 'Activo',
     creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (id_propietario) REFERENCES propietarios(id_propietario) ON DELETE CASCADE,
@@ -93,6 +93,17 @@ const SCHEMA_STATEMENTS = [
     FOREIGN KEY (id_veterinario) REFERENCES usuarios(id_usuario) ON DELETE SET NULL
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
+  `CREATE TABLE IF NOT EXISTS lotes_vacunas (
+    id_lote INT AUTO_INCREMENT PRIMARY KEY,
+    vacuna VARCHAR(120) NOT NULL,
+    lote_fabricante VARCHAR(60) NOT NULL,
+    fecha_vencimiento DATE NOT NULL,
+    dosis_iniciales INT UNSIGNED NOT NULL,
+    dosis_disponibles INT UNSIGNED NOT NULL,
+    creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_lote_vacuna (vacuna, lote_fabricante)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
   `CREATE TABLE IF NOT EXISTS carnet_vacunacion (
     id_vacunacion INT AUTO_INCREMENT PRIMARY KEY,
     id_mascota INT NOT NULL,
@@ -100,12 +111,14 @@ const SCHEMA_STATEMENTS = [
     veterinario_nombre VARCHAR(120) DEFAULT NULL,
     vacuna VARCHAR(120) NOT NULL,
     lote_fabricante VARCHAR(60) NOT NULL,
+    id_lote INT DEFAULT NULL,
     fecha_aplicacion DATE NOT NULL,
     fecha_proximo_refuerzo DATE NOT NULL,
     estado_dosis ENUM('al-dia', 'por-vencer', 'vencida') NOT NULL DEFAULT 'al-dia',
     observaciones VARCHAR(255) DEFAULT NULL,
     FOREIGN KEY (id_mascota) REFERENCES mascotas(id_mascota) ON DELETE CASCADE,
-    FOREIGN KEY (id_veterinario) REFERENCES usuarios(id_usuario) ON DELETE SET NULL
+    FOREIGN KEY (id_veterinario) REFERENCES usuarios(id_usuario) ON DELETE SET NULL,
+    FOREIGN KEY (id_lote) REFERENCES lotes_vacunas(id_lote) ON DELETE RESTRICT
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
 
   `CREATE TABLE IF NOT EXISTS recordatorios (
@@ -185,9 +198,14 @@ const SAFE_ALTERS = [
   "ALTER TABLE usuarios ADD COLUMN estado ENUM('activo', 'inactivo') NOT NULL DEFAULT 'activo'",
   'ALTER TABLE propietarios ADD COLUMN id_usuario INT DEFAULT NULL',
   'ALTER TABLE mascotas ADD COLUMN id_raza INT DEFAULT NULL',
+  'ALTER TABLE mascotas ADD COLUMN creado_en TIMESTAMP NULL DEFAULT NULL',
+  'ALTER TABLE consultas_historial ADD COLUMN fecha_hora TIMESTAMP NULL DEFAULT NULL',
+  'ALTER TABLE carnet_vacunacion ADD COLUMN fecha_aplicacion DATE DEFAULT NULL',
+  'ALTER TABLE carnet_vacunacion ADD COLUMN fecha_proximo_refuerzo DATE DEFAULT NULL',
   'ALTER TABLE mascotas ADD COLUMN edad VARCHAR(50) DEFAULT NULL',
   'ALTER TABLE consultas_historial ADD COLUMN veterinario_nombre VARCHAR(120) DEFAULT NULL',
   'ALTER TABLE consultas_historial ADD COLUMN borrador_ia TEXT DEFAULT NULL',
+  'ALTER TABLE carnet_vacunacion ADD COLUMN id_lote INT DEFAULT NULL, ADD FOREIGN KEY (id_lote) REFERENCES lotes_vacunas(id_lote) ON DELETE RESTRICT',
   'ALTER TABLE carnet_vacunacion ADD COLUMN id_veterinario INT DEFAULT NULL',
   'ALTER TABLE carnet_vacunacion ADD COLUMN observaciones VARCHAR(255) DEFAULT NULL',
   'ALTER TABLE carnet_vacunacion ADD COLUMN veterinario_nombre VARCHAR(120) DEFAULT NULL',

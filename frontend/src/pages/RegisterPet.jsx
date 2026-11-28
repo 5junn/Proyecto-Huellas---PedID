@@ -1,28 +1,18 @@
 // src/pages/RegisterPet.jsx
 import React, { useState, useRef } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import Icon from '../components/Icon';
 import CollarQRTag from '../components/CollarQRTag';
-import WhatsAppChatbotModal from '../components/WhatsAppChatbotModal';
+import ClinicContactDialog from '../components/ClinicContactDialog';
 import { apiFetch } from '../services/apiClient';
 import { getRazasPorEspecie } from '../data/razasData';
 import { getVacunaSugerida, getListaVacunasPorEspecie } from '../data/vacunasData';
 import '../styles/landing.css';
 import '../styles/auth.css';
 
-const DEFAULT_AVATARS = [
-  { label: 'Beagle', url: 'https://images.unsplash.com/photo-1552053831-71594a27632d?auto=format&fit=crop&w=400&q=80' },
-  { label: 'Golden / Labrador', url: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80' },
-  { label: 'Bulldog Francés', url: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&w=400&q=80' },
-  { label: 'Gato Siamés', url: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80' },
-  { label: 'Gato Naranja', url: 'https://images.unsplash.com/photo-1574158622682-e40e69881006?auto=format&fit=crop&w=400&q=80' },
-  { label: 'Cachorro Mestizo', url: 'https://images.unsplash.com/photo-1587300003388-59208cc962cb?auto=format&fit=crop&w=400&q=80' }
-];
-
 export default function RegisterPet({ user }) {
-  const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
   // Datos de la Mascota
@@ -35,11 +25,10 @@ export default function RegisterPet({ user }) {
     peso: '',
     color: '',
     alergias: '',
-    foto: DEFAULT_AVATARS[0].url
+    foto: ''
   });
 
   // Estado de la foto cargada por el usuario
-  const [isCustomPhoto, setIsCustomPhoto] = useState(false);
   const [customPhotoName, setCustomPhotoName] = useState('');
 
   const [enableWhatsAppReminder, setEnableWhatsAppReminder] = useState(false);
@@ -90,22 +79,20 @@ export default function RegisterPet({ user }) {
       if (typeof dataUrl === 'string') {
         setPetData((prev) => ({ ...prev, foto: dataUrl }));
         setCustomPhotoName(file.name);
-        setIsCustomPhoto(true);
       }
     };
     reader.readAsDataURL(file);
   };
 
   const handleRemoveCustomPhoto = () => {
-    setIsCustomPhoto(false);
     setCustomPhotoName('');
-    setPetData((prev) => ({ ...prev, foto: DEFAULT_AVATARS[0].url }));
+    setPetData((prev) => ({ ...prev, foto: '' }));
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
-  // Abrir el Chatbot oficial de WhatsApp para simular el recordatorio
+  // Abrir la guía del recordatorio registrado
   const handleOpenChatbot = () => {
     setIsChatbotOpen(true);
   };
@@ -207,10 +194,7 @@ export default function RegisterPet({ user }) {
               marginBottom: '1.8rem',
               border: '1px solid rgba(255, 255, 255, 0.1)'
             }}>
-              <CollarQRTag
-                pet={registeredPet}
-                onScanSimulate={() => navigate(`/pet/${registeredPet.codigoQR}`)}
-              />
+              <CollarQRTag pet={registeredPet} />
             </div>
 
             {/* BOTONES DE NAVEGACIÓN */}
@@ -251,7 +235,7 @@ export default function RegisterPet({ user }) {
                 }}
               >
                 <Icon name="whatsapp" size={18} />
-                <span>Abrir Chatbot HuellasBot 🐾</span>
+                <span>Contactar a la clínica</span>
               </button>
 
               <Link
@@ -389,142 +373,17 @@ export default function RegisterPet({ user }) {
                   </div>
                 </div>
 
-                {/* ========================================================
-                    CAMPO PARA CARGAR FOTO REAL + SELECCIÓN DE AVATAR
-                   ======================================================== */}
-                <div style={{
-                  marginTop: '1.2rem',
-                  background: 'rgba(15, 23, 42, 0.65)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '16px',
-                  padding: '1.2rem'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem' }}>
-                    <label style={{ color: '#E2E8F0', fontSize: '0.88rem', fontWeight: 700, margin: 0 }}>
-                      Foto de la Mascota
-                    </label>
-                    {isCustomPhoto && (
-                      <span style={{
-                        background: 'rgba(16, 185, 129, 0.15)',
-                        color: '#10B981',
-                        padding: '0.2rem 0.5rem',
-                        borderRadius: '6px',
-                        fontSize: '0.72rem',
-                        fontWeight: 700
-                      }}>
-                        ✓ Foto Personalizada
-                      </span>
-                    )}
-                  </div>
-
-                  {/* ZONA DE CARGA DE ARCHIVO */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-                    <div style={{ position: 'relative' }}>
-                      <img
-                        src={petData.foto}
-                        alt="Vista previa"
-                        style={{
-                          width: '74px',
-                          height: '74px',
-                          borderRadius: '50%',
-                          objectFit: 'cover',
-                          border: isCustomPhoto ? '3px solid #10B981' : '3px solid #38BDF8',
-                          boxShadow: '0 4px 14px rgba(0,0,0,0.4)'
-                        }}
-                      />
+                <div className="hp-pet-photo-input">
+                  <label htmlFor="pet-file-uploader">Foto de la mascota (opcional)</label>
+                  <input type="file" id="pet-file-uploader" ref={fileInputRef}
+                    accept="image/jpeg,image/png,image/webp,image/gif" onChange={handlePhotoUpload} />
+                  {petData.foto && (
+                    <div>
+                      <img src={petData.foto} alt="Foto seleccionada" width={74} height={74} />
+                      <span>{customPhotoName}</span>
+                      <button type="button" className="btn btn-outline sm" onClick={handleRemoveCustomPhoto}>Quitar foto</button>
                     </div>
-
-                    <div style={{ flex: 1, minWidth: '200px' }}>
-                      {/* Input de archivo oculto */}
-                      <input
-                        type="file"
-                        ref={fileInputRef}
-                        accept="image/*"
-                        id="pet-file-uploader"
-                        onChange={handlePhotoUpload}
-                        style={{ display: 'none' }}
-                      />
-
-                      <label
-                        htmlFor="pet-file-uploader"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.5rem',
-                          padding: '0.65rem 1.1rem',
-                          borderRadius: '10px',
-                          background: 'linear-flex(135deg, #38BDF8, #0284C7)',
-                          backgroundColor: '#0284C7',
-                          color: '#FFFFFF',
-                          fontSize: '0.82rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          boxShadow: '0 4px 12px rgba(2, 132, 199, 0.35)'
-                        }}
-                      >
-                        <Icon name="upload" size={16} />
-                        <span>Subir Foto desde tu Equipo</span>
-                      </label>
-
-                      {isCustomPhoto ? (
-                        <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ color: '#94A3B8', fontSize: '0.75rem' }}>
-                            {customPhotoName || 'Imagen cargada con éxito'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={handleRemoveCustomPhoto}
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: '#EF4444',
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              textDecoration: 'underline'
-                            }}
-                          >
-                            Quitar y usar avatar
-                          </button>
-                        </div>
-                      ) : (
-                        <p style={{ color: '#64748B', fontSize: '0.72rem', margin: '0.4rem 0 0' }}>
-                          Formatos admitidos: JPG, PNG, WebP (máx. 5MB)
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* O SELECCIONAR UN AVATAR */}
-                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '0.8rem' }}>
-                    <span style={{ color: '#94A3B8', fontSize: '0.76rem', display: 'block', marginBottom: '0.5rem' }}>
-                      O elige uno de nuestros avatares predeterminados:
-                    </span>
-                    <div style={{ display: 'flex', gap: '0.6rem', overflowX: 'auto', paddingBottom: '0.4rem' }}>
-                      {DEFAULT_AVATARS.map((av, idx) => (
-                        <img
-                          key={idx}
-                          src={av.url}
-                          alt={av.label}
-                          title={av.label}
-                          onClick={() => {
-                            setIsCustomPhoto(false);
-                            setCustomPhotoName('');
-                            setPetData({ ...petData, foto: av.url });
-                          }}
-                          style={{
-                            width: '48px',
-                            height: '48px',
-                            borderRadius: '50%',
-                            objectFit: 'cover',
-                            cursor: 'pointer',
-                            border: petData.foto === av.url && !isCustomPhoto ? '3px solid #10B981' : '2px solid rgba(255,255,255,0.2)',
-                            boxShadow: petData.foto === av.url && !isCustomPhoto ? '0 0 10px rgba(16, 185, 129, 0.5)' : 'none'
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* CONDICIONES MÉDICAS Y ALERGIAS */}
@@ -553,7 +412,7 @@ export default function RegisterPet({ user }) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.8rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#10B981' }}>
                     <Icon name="whatsapp" size={22} />
-                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#FFFFFF' }}>Recordatorios con Chatbot HuellasBot</h3>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: '#FFFFFF' }}>Recordatorios preventivos</h3>
                   </div>
                   <input
                     type="checkbox"
@@ -638,7 +497,7 @@ export default function RegisterPet({ user }) {
                       }}
                     >
                       <Icon name="whatsapp" size={18} />
-                      <span>🤖 Probar Asistente Chatbot WhatsApp (HuellasBot)</span>
+                      <span>Ver contacto de la clínica</span>
                     </button>
                   </div>
                 )}
@@ -712,13 +571,12 @@ export default function RegisterPet({ user }) {
         )}
       </main>
 
-      {/* MODAL DEL CHATBOT DE WHATSAPP (HUELLASBOT) */}
-      <WhatsAppChatbotModal
+      {/* CONTACTO DE LA CLÍNICA */}
+      <ClinicContactDialog
         isOpen={isChatbotOpen}
         onClose={() => setIsChatbotOpen(false)}
-        petName={petData.nombre || 'tu mascota'}
-        ownerName={user.nombres}
-        vaccineName={vaccineName}
+        petName={registeredPet?.nombre}
+        vaccineName={registeredPet?.id_recordatorio ? vaccineName : null}
         dueDate={`En ${reminderDays} días`}
         petCode={registeredPet?.codigoQR}
       />

@@ -1081,12 +1081,6 @@
   background: var(--amber-100);
 }
 
-.demo-note {
-  font-size: 13px;
-  text-align: center;
-  color: var(--faint);
-}
-
 /* Secciones sin conectar */
 .info {
   display: flex;

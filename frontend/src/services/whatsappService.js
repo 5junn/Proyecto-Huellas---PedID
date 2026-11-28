@@ -2,16 +2,16 @@
 import { apiFetch } from './apiClient';
 
 export function formatWhatsAppPhone(phone) {
-  if (!phone) return '51987654321';
-  const cleaned = String(phone).replace(/[^0-9]/g, '');
+  const cleaned = String(phone || '').replace(/[^0-9]/g, '');
   if (cleaned.length === 9) {
     return `51${cleaned}`;
   }
-  return cleaned || '51987654321';
+  return /^[1-9]\d{9,14}$/.test(cleaned) ? cleaned : null;
 }
 
 export function generateWhatsAppLink(phone, message) {
   const cleanPhone = formatWhatsAppPhone(phone);
+  if (!cleanPhone) return null;
   const encodedText = encodeURIComponent(String(message || '').trim());
   return `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedText}`;
 }

@@ -331,6 +331,51 @@ router.get('/propietarios', requireSession, allowRoles(RECEPTION_ROLES), async (
   }
 });
 
+// Admisión clínica. El propietario puede vincular después su cuenta verificando el mismo correo y DNI.
+router.post('/propietarios', requireSession, allowRoles(RECEPTION_ROLES), async (req, res) => {
+  try {
+    const nombres = sanitizeText(req.body?.nombres, 120);
+    const dni = sanitizeText(req.body?.dni, 20);
+    const correo = sanitizeText(req.body?.correo, 120).toLowerCase();
+    const telefono = normalizePhone(req.body?.telefono);
+    const direccion = sanitizeText(req.body?.direccion, 255);
+    if (nombres.length < 3 || !/^\d{8}$/.test(dni) || !isValidEmail(correo) ||
+        !/^519\d{8}$/.test(telefono) || !direccion) {
+      return res.status(400).json({ message: 'Ingresa el nombre, DNI de 8 dígitos, correo, celular peruano y dirección del propietario.' });
+    }
+    const [created] = await db.queryAsync(
+      `INSERT INTO propietarios (nombres, dni, correo, telefono, direccion)
+       SELECT ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM usuarios WHERE correo = ?)`,
+      [nombres, dni, correo, telefono, direccion, correo]
+    );
+    if (!created.affectedRows) {
+      return res.status(409).json({ message: 'Este correo ya tiene una cuenta. Busca al propietario en el directorio.' });
+    }
+    return res.status(201).json({ id_propietario: created.insertId, nombres });
+  } catch (err) {
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ message: 'Ya existe un perfil con este DNI o correo.' });
+    }
+    console.error('[Propietarios POST]', err.code || err.name);
+    return res.status(500).json({ message: 'No se pudo guardar el perfil del propietario.' });
+  }
+});
+
+// El listado de cuentas no incluye credenciales ni documentos personales.
+router.get('/usuarios', requireSession, allowRoles(['Administrador']), async (req, res) => {
+  try {
+    const [accounts] = await db.queryAsync(
+      `SELECT id_usuario AS id, nombres, correo, rol, especialidad, turno, estado
+       FROM usuarios WHERE contrasena_cifrada <> ? ORDER BY nombres, id_usuario`,
+      [DEMO_SEED_HASH]
+    );
+    res.json(accounts);
+  } catch (err) {
+    console.error('[Cuentas GET]', err.code || err.name);
+    res.status(500).json({ message: 'Error al consultar las cuentas.' });
+  }
+});
+
 /**
  * GET /api/auth/staff
  * Lista personal clínico desde MySQL.
@@ -340,8 +385,9 @@ router.get('/staff', requireSession, allowRoles(['Administrador']), async (req, 
     const [staff] = await db.queryAsync(
       `SELECT id_usuario AS id, nombres, correo, rol, especialidad, turno, estado, telefono
        FROM usuarios
-       WHERE rol IN ('Administrador', 'Veterinario', 'Recepcionista')
-       ORDER BY id_usuario ASC`
+       WHERE rol IN ('Administrador', 'Veterinario', 'Recepcionista') AND contrasena_cifrada <> ?
+       ORDER BY id_usuario ASC`,
+      [DEMO_SEED_HASH]
     );
     res.json(staff);
   } catch (err) {
